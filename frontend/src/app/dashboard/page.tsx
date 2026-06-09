@@ -74,7 +74,7 @@ export default function DashboardPage() {
   const [theme, setTheme]                   = useState<Theme>("system");
   const [resolvedDark, setResolvedDark]     = useState(false);
   const [showSniperForm, setShowSniperForm] = useState(false);
-  const [showGroupForm, setShowGroupForm]   = useState(false);
+  const [comingSoonGroup, setComingSoonGroup] = useState(false);
   const [showPageForm, setShowPageForm]     = useState(false);
   const [queueFilter, setQueueFilter]       = useState<"all"|"pending"|"sent"|"failed">("all");
   const [metaToken, setMetaToken]           = useState("");
@@ -1634,43 +1634,20 @@ export default function DashboardPage() {
             <h2 style={{ margin: "0 0 0.25rem", fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 700, fontSize: "1.25rem", color: "var(--text-1)", letterSpacing: "-0.4px" }}>Groups</h2>
             <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-2)" }}>Facebook groups you are targeting</p>
           </div>
-          <button onClick={() => setShowGroupForm(!showGroupForm)} style={{ ...btnPrimary }}>
-            <Plus size={14} strokeWidth={2.5} />{showGroupForm ? "Cancel" : "Add Group"}
-          </button>
-        </div>
-
-        {showGroupForm && (
-          <div style={{ ...card, padding: "1.25rem", marginBottom: "1.25rem" }}>
-            <h3 style={{ ...h3, marginBottom: "1rem" }}>Add New Group</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "0.75rem", alignItems: "flex-end" }}>
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Group Name</label>
-                <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} style={{ ...inputStyle }} placeholder="e.g. Facebook Ads Mastermind" />
+          <div style={{ position: "relative" }}>
+            <button 
+              onClick={() => { setComingSoonGroup(true); setTimeout(() => setComingSoonGroup(false), 2000); }} 
+              style={{ ...btnPrimary }}
+            >
+              <Plus size={14} strokeWidth={2.5} />Add Group
+            </button>
+            {comingSoonGroup && (
+              <div style={{ position: "absolute", top: "115%", right: 0, padding: "0.4rem 0.75rem", backgroundColor: "#1d1d1d", color: "#fff", fontSize: "0.75rem", fontWeight: 600, borderRadius: "0.5rem", whiteSpace: "nowrap", zIndex: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", animation: "fadeIn 0.2s ease" }}>
+                Coming soon ✨
               </div>
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Group URL or ID</label>
-                <input type="text" value={groupUrl} onChange={(e) => setGroupUrl(e.target.value)} style={{ ...inputStyle }} placeholder="https://facebook.com/groups/…" />
-              </div>
-              <button
-                onClick={async () => {
-                  if (!groupName.trim() || !user?.id) return;
-                  const { data: inserted, error } = await supabase
-                    .from("target_groups")
-                    .insert({ user_id: user.id, name: groupName.trim(), url: groupUrl.trim() })
-                    .select("id, name, url")
-                    .single();
-                  if (!error && inserted) {
-                    setGroups(prev => [...prev, inserted]);
-                    logActivity("Added Group", groupName.trim(), "success");
-                    setGroupName(""); setGroupUrl("");
-                    setShowGroupForm(false);
-                  }
-                }}
-                style={{ ...btnPrimary, whiteSpace: "nowrap" }}
-              ><Plus size={13} />Add Group</button>
-            </div>
+            )}
           </div>
-        )}
+        </div>
 
         <div style={{ ...card, overflow: "hidden" }}>
           <div style={{ padding: "1.125rem 1.375rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "0.75rem" }}>
