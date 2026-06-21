@@ -54,7 +54,7 @@ export default function LandingPage() {
             <Link href="#guide" className="hover:text-blue-600 transition-colors">Guide</Link>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
-            <Link href="/signin" className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
+            <Link href="/signin" className="text-xs sm:text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors px-3 sm:px-4 py-2 sm:py-2.5">
               Sign In
             </Link>
             <Link href="/signup" className="text-xs sm:text-sm font-semibold bg-gray-900 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-full hover:bg-gray-800 transition-all flex items-center gap-2 hover:shadow-lg hover:-translate-y-0.5">
