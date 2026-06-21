@@ -1121,16 +1121,25 @@ export default function DashboardPage() {
         </div>
 
         {/* Bottom row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "0.875rem" }}>
+        <div className="grid grid-cols-1 lg:grid-cols-1 lg:gap-0.875rem">
           {/* Activity */}
           <div style={{ ...card, overflow: "hidden" }}>
-            <div style={{ padding: "1.125rem 1.375rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div><h3 style={h3}>Recent Activity</h3><p style={{ margin: "0.125rem 0 0", fontSize: "0.75rem", color: "var(--text-3)" }}>Last 50 sniper actions</p></div>
-              <button onClick={() => setActiveNav("Analytics")} style={{ background: "none", border: "1px solid var(--border)", borderRadius: "0.4375rem", padding: "0.3125rem 0.625rem", fontSize: "0.75rem", fontWeight: 500, color: "var(--text-2)", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem" }}>View all <ArrowUpRight size={11} /></button>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 sm:p-4.5 lg:p-4.5 lg:px-5.5 border-b border-[var(--border)] gap-3 sm:gap-0">
+              <div>
+                <h3 style={h3} className="text-base sm:text-lg">Recent Activity</h3>
+                <p className="text-xs text-[var(--text-3)] mt-0.5">Last 50 sniper actions</p>
+              </div>
+              <button onClick={() => setActiveNav("Analytics")} className="border border-[var(--border)] rounded-md px-2.5 py-1 text-xs font-medium text-[var(--text-2)] cursor-pointer flex items-center gap-1 hover:bg-[var(--surface-hover)] transition-colors">
+                View all <ArrowUpRight size={11} />
+              </button>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px 100px", padding: "0.5rem 1.375rem", borderBottom: "1px solid var(--border)" }}>
-              {["Action","Target","Status","Time"].map(h => <span key={h} style={label}>{h}</span>)}
+            
+            {/* Desktop headers */}
+            <div className="hidden sm:grid grid-cols-4 px-4 sm:px-5.5 py-2 border-b border-[var(--border)]">
+              {["Action","Target","Status","Time"].map(h => <span key={h} style={label} className="text-xs">{h}</span>)}
             </div>
+            
+            {/* Mobile and desktop rows */}
             {activityLog.length > 0 ? (
               activityLog.slice(0, 10).map((entry, i) => {
                 const sc = entry.status === "success" ? "#10b981" : entry.status === "failed" ? "#ef4444" : "#f59e0b";
@@ -1138,14 +1147,32 @@ export default function DashboardPage() {
                 const diff = Math.floor((Date.now() - d.getTime()) / 1000);
                 const timeStr = diff < 60 ? "just now" : diff < 3600 ? `${Math.floor(diff/60)}m ago` : diff < 86400 ? `${Math.floor(diff/3600)}h ago` : d.toLocaleDateString();
                 return (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px 100px", padding: "0.6875rem 1.375rem", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
-                    <span style={{ fontSize: "0.8125rem", color: "var(--text-1)", fontWeight: 500 }}>{entry.action}</span>
-                    <span style={{ fontSize: "0.8125rem", color: "var(--text-2)" }}>{entry.target}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
-                      <div style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: sc, flexShrink: 0 }} />
-                      <span style={{ fontSize: "0.75rem", fontWeight: 600, color: sc, textTransform: "capitalize" }}>{entry.status}</span>
+                  <div key={i} className="sm:grid sm:grid-cols-4 p-4 sm:p-4.5 sm:px-5.5 border-b border-[var(--border)] sm:items-center">
+                    {/* Mobile layout */}
+                    <div className="sm:hidden flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--text-1)] font-medium">{entry.action}</span>
+                        <div className="flex items-center gap-1">
+                          <div style={{ width: "4px", height: "4px", borderRadius: "50%", backgroundColor: sc, flexShrink: 0 }} />
+                          <span className="text-xs font-semibold capitalize" style={{ color: sc }}>{entry.status}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--text-2)]">{entry.target}</span>
+                        <span className="text-xs text-[var(--text-3)]">{timeStr}</span>
+                      </div>
                     </div>
-                    <span style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>{timeStr}</span>
+                    
+                    {/* Desktop layout */}
+                    <>
+                      <span className="hidden sm:block text-sm text-[var(--text-1)] font-medium">{entry.action}</span>
+                      <span className="hidden sm:block text-sm text-[var(--text-2)]">{entry.target}</span>
+                      <div className="hidden sm:flex items-center gap-1.5">
+                        <div style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: sc, flexShrink: 0 }} />
+                        <span className="text-xs font-semibold capitalize" style={{ color: sc }}>{entry.status}</span>
+                      </div>
+                      <span className="hidden sm:block text-xs text-[var(--text-3)]">{timeStr}</span>
+                    </>
                   </div>
                 );
               })
@@ -1198,12 +1225,12 @@ export default function DashboardPage() {
     // ── SNIPER ────────────────────────────────────────────────────────────────
     if (activeNav === "Sniper") return (
       <>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
           <div>
-            <h2 style={{ margin: "0 0 0.25rem", fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 700, fontSize: "1.25rem", color: "var(--text-1)", letterSpacing: "-0.4px" }}>Sniper</h2>
-            <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-2)" }}>Create and manage your automation campaigns</p>
+            <h2 className="text-xl font-bold text-[var(--text-1)] tracking-tight mb-1">Sniper</h2>
+            <p className="text-sm text-[var(--text-2)]">Create and manage your automation campaigns</p>
           </div>
-          <button onClick={() => setShowSniperForm(!showSniperForm)} style={{ ...btnPrimary }}>
+          <button onClick={() => setShowSniperForm(!showSniperForm)} style={{ ...btnPrimary }} className="w-full sm:w-auto">
             <Plus size={14} strokeWidth={2.5} />{showSniperForm ? "Cancel" : "New Campaign"}
           </button>
         </div>
@@ -1211,23 +1238,28 @@ export default function DashboardPage() {
         {showSniperForm && (
           <div style={{ ...card, padding: "1.5rem", marginBottom: "1.25rem" }}>
             <h3 style={{ ...h3, marginBottom: "1.25rem" }}>Campaign Setup</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Action Type</label>
-                <select value={campaignType} onChange={(e) => setCampaignType(e.target.value)} style={{ ...inputStyle }}>
+                <label className="block text-xs font-semibold text-[var(--text-1)] mb-1.5">Action Type</label>
+                <select value={campaignType} onChange={(e) => setCampaignType(e.target.value)} style={{ ...inputStyle }} className="w-full">
                   <option value="Post to group/page">Post to group/page</option>
                   <option value="Comment on post">Comment on post</option>
                   <option value="Like posts">Like posts</option>
                 </select>
               </div>
               <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Frequency</label>
-                <div style={{ display: "flex", borderRadius: "0.5rem", border: "1px solid var(--border)", overflow: "hidden", height: "38px" }}>
+                <label className="block text-xs font-semibold text-[var(--text-1)] mb-1.5">Frequency</label>
+                <div className="flex rounded-lg border border-[var(--border)] overflow-hidden h-9">
                   {(["once", "daily"] as const).map(f => (
                     <button key={f} type="button" onClick={() => setFrequency(f)}
-                      style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
+                      className="flex-1 border-0 cursor-pointer text-xs font-semibold transition-all duration-150
+                        bg-[var(--surface)] text-[var(--text-2)]
+                        hover:bg-[var(--hover-bg)]
+                        data-[active=true]:bg-[var(--text-1)] data-[active=true]:text-white"
+                      style={{
                         backgroundColor: frequency === f ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
-                        color: frequency === f ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
+                        color: frequency === f ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)"
+                      }}>
                       {f === "once" ? "Post Once" : "Post Daily"}
                     </button>
                   ))}

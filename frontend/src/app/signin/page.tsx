@@ -49,16 +49,26 @@ export default function SignInPage() {
       return;
     }
 
-    // Check 2FA before entering dashboard
+    // Check 2FA before entering dashboard (with timeout to prevent delays)
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     try {
-      const r = await fetch(`${apiBase}/api/auth/2fa-status/${data.user.id}`);
-      const status = await r.json();
-      if (status.two_fa_enabled) {
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 3000)
+      );
+      
+      const statusPromise = fetch(`${apiBase}/api/auth/2fa-status/${data.user.id}`)
+        .then(r => r.json());
+      
+      const status = await Promise.race([statusPromise, timeoutPromise]);
+      
+      if (status && status.two_fa_enabled) {
         router.push("/2fa-challenge");
         return;
       }
-    } catch {}
+    } catch {
+      // If 2FA check fails or times out, proceed to dashboard
+      console.log('2FA check failed or timed out, proceeding to dashboard');
+    }
 
     router.push("/dashboard");
   }
