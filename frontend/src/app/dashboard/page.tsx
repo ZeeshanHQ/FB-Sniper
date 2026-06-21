@@ -814,7 +814,7 @@ export default function DashboardPage() {
               {activeNav}
             </h1>
             {/* Mobile Account Dropdown */}
-            <div ref={userDropdownRef} style={{ position: "relative" }}>
+            <div ref={dropdownRef} style={{ position: "relative" }}>
               <button
                 onClick={() => { setUserDropdownOpen(o => !o); }}
                 className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] flex items-center justify-center text-[var(--text-2)]"
