@@ -793,10 +793,11 @@ export default function DashboardPage() {
       </aside>
 
       {/* ─────────────────────── MAIN ─────────────────────── */}
-      <main className={`flex-1 flex flex-col min-h-screen ${!isMobile ? '' : 'ml-0'} transition-all duration-300`} 
+      <main className={`flex-1 flex flex-col ${!isMobile ? 'ml-0' : 'ml-0'} transition-all duration-300 max-w-full`} 
         style={{ 
           marginLeft: !isMobile ? SW : undefined,
-          minHeight: !isMobile ? '100vh' : undefined
+          width: !isMobile ? `calc(100% - ${SW})` : '100%',
+          maxWidth: !isMobile ? `calc(100vw - ${SW})` : '100vw'
         }}
       >
 
@@ -812,7 +813,48 @@ export default function DashboardPage() {
             <h1 className="font-bricolage font-semibold text-sm text-[var(--text-1)]">
               {activeNav}
             </h1>
-            <div className="w-8" /> {/* Spacer for centering */}
+            {/* Mobile Account Dropdown */}
+            <div ref={userDropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => { setUserDropdownOpen(o => !o); }}
+                className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] flex items-center justify-center text-[var(--text-2)]"
+                style={{ cursor: "pointer" }}
+              >
+                <User size={16} strokeWidth={2} />
+              </button>
+
+              {userDropdownOpen && (
+                <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", width: "280px", borderRadius: "0.875rem", backgroundColor: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", zIndex: 100, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                  {/* User info */}
+                  <div style={{ padding: "1rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <div style={{ width: "40px", height: "40px", borderRadius: "50%", backgroundColor: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-2)", fontSize: "0.875rem", fontWeight: 600 }}>
+                      {user?.email?.charAt(0).toUpperCase() || "U"}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {user?.user_metadata?.full_name || user?.email || "User"}
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {user?.email || ""}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ padding: "0.5rem" }}>
+                    <button
+                      onClick={() => { setShowDeleteModal(true); setUserDropdownOpen(false); }}
+                      style={{ width: "100%", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "none", backgroundColor: "transparent", color: "#ef4444", fontSize: "0.8125rem", fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", transition: "background-color 0.15s ease" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.1)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+                    >
+                      <Trash2 size={14} strokeWidth={2} />
+                      Delete Account
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </header>
         )}
 
@@ -996,8 +1038,10 @@ export default function DashboardPage() {
         )}
 
         {/* Page body */}
-        <div className="flex-1 p-4 sm:p-6 lg:p-7 overflow-y-auto">
-          {renderContent()}
+        <div className="flex-1 p-4 sm:p-6 lg:p-7 xl:p-8 2xl:p-10 overflow-y-auto max-w-full">
+          <div className="w-full max-w-7xl mx-auto">
+            {renderContent()}
+          </div>
         </div>
       </main>
 
