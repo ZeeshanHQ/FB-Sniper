@@ -816,14 +816,14 @@ export default function DashboardPage() {
             {/* Mobile Account Dropdown */}
             <div ref={dropdownRef} style={{ position: "relative" }}>
               <button
-                onClick={() => { setUserDropdownOpen(o => !o); }}
+                onClick={() => { setDropdown(o => !o); }}
                 className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] flex items-center justify-center text-[var(--text-2)]"
                 style={{ cursor: "pointer" }}
               >
                 <User size={16} strokeWidth={2} />
               </button>
 
-              {userDropdownOpen && (
+              {dropdown && (
                 <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", width: "280px", borderRadius: "0.875rem", backgroundColor: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", zIndex: 100, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                   {/* User info */}
                   <div style={{ padding: "1rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -843,7 +843,7 @@ export default function DashboardPage() {
                   {/* Actions */}
                   <div style={{ padding: "0.5rem" }}>
                     <button
-                      onClick={() => { setShowDeleteModal(true); setUserDropdownOpen(false); }}
+                      onClick={() => { setShowDeleteModal(true); setDropdown(false); }}
                       style={{ width: "100%", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "none", backgroundColor: "transparent", color: "#ef4444", fontSize: "0.8125rem", fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", transition: "background-color 0.15s ease" }}
                       onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.1)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
