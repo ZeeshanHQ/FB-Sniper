@@ -993,6 +993,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </header>
+        )}
 
         {/* Page body */}
         <div className="flex-1 p-4 sm:p-6 lg:p-7 overflow-y-auto">
