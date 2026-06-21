@@ -9,7 +9,7 @@ import {
   Activity, CheckCircle2, Zap, ArrowUpRight,
   FileText, AlertCircle, PanelLeftClose, PanelLeftOpen,
   Sun, Moon, Monitor, Plus, Send, Link2, Calendar,
-  XCircle, TrendingDown, Trash2, Play, Hash, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare,
+  XCircle, TrendingDown, Trash2, Play, Hash, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, User,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
