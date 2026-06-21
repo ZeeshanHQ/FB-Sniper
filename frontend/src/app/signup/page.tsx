@@ -57,42 +57,30 @@ export default function SignUpPage() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "Interdisplay, Arial, sans-serif" }}>
+    <div className="flex min-h-screen font-sans" style={{ fontFamily: "Interdisplay, Arial, sans-serif" }}>
 
       {/* Left Panel — Dark / Brand */}
       <div
-        style={{
-          width: "50%",
-          backgroundColor: "#1d1d1d",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          padding: "3rem",
-          position: "relative",
-          overflow: "hidden",
-        }}
-        className="hidden lg:flex"
+        className="hidden lg:flex lg:w-1/2 bg-gray-900 flex-col justify-between p-8 lg:p-12 relative overflow-hidden"
       >
         <div
+          className="absolute top-0 right-0 w-96 h-96 rounded-full bg-blue-600/10"
           style={{
-            position: "absolute",
             top: "-100px",
             right: "-100px",
             width: "400px",
             height: "400px",
-            borderRadius: "50%",
             background: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%)",
             pointerEvents: "none",
           }}
         />
         <div
+          className="absolute bottom-0 left-0 w-80 h-80 rounded-full bg-blue-500/10"
           style={{
-            position: "absolute",
             bottom: "-80px",
             left: "-80px",
             width: "300px",
             height: "300px",
-            borderRadius: "50%",
             background: "radial-gradient(circle, rgba(64,106,228,0.12) 0%, transparent 70%)",
             pointerEvents: "none",
           }}
@@ -100,55 +88,37 @@ export default function SignUpPage() {
 
         {/* Logo */}
         <div>
-          <Image src="/logo-new-white.png" alt="Astraventa" width={160} height={40} style={{ objectFit: "contain", objectPosition: "left" }} />
+          <Image src="/logo-new-white.png" alt="Astraventa" width={160} height={40} className="h-10 w-auto object-contain object-left" />
         </div>
 
         {/* Feature checklist */}
-        <div style={{ position: "relative", zIndex: 2 }}>
+        <div className="relative z-2">
           <h2
-            style={{
-              fontFamily: "'Bricolage Grotesque', sans-serif",
-              fontWeight: 600,
-              fontSize: "2.5rem",
-              lineHeight: "1.2em",
-              letterSpacing: "-1px",
-              color: "#ffffff",
-              margin: "0 0 2rem 0",
-            }}
+            className="font-bricolage font-semibold text-3xl lg:text-4xl leading-tight tracking-tight text-white mb-8"
           >
             Start automating
             <br />
             in minutes.
           </h2>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+          <div className="flex flex-col gap-5">
             {[
               { Icon: Target,     title: "Precision Targeting",    desc: "Target specific groups and pages with surgical accuracy." },
               { Icon: Key,        title: "60-Day Tokens",          desc: "Auto-exchange to long-lived tokens. No constant re-auth." },
               { Icon: BarChart3,  title: "Full Audit Trail",       desc: "Every action logged with status, timestamp, and metadata." },
               { Icon: ShieldCheck, title: "Multi-Tenant Isolation", desc: "Your data is fully isolated from all other users." },
             ].map(({ Icon, title, desc }) => (
-              <div key={title} style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+              <div key={title} className="flex gap-4 items-start">
                 <div
-                  style={{
-                    width: "40px",
-                    height: "40px",
-                    borderRadius: "10px",
-                    backgroundColor: "rgba(255,255,255,0.06)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
+                  className="w-10 h-10 rounded-xl bg-white/6 border border-white/10 flex items-center justify-center flex-shrink-0"
                 >
                   <Icon size={18} color="#3b82f6" strokeWidth={1.75} />
                 </div>
                 <div>
-                  <div style={{ color: "#ffffff", fontWeight: 600, fontSize: "0.9375rem", marginBottom: "0.2rem" }}>
+                  <div className="text-white font-semibold text-sm mb-1">
                     {title}
                   </div>
-                  <div style={{ color: "#4d585f", fontSize: "0.875rem", lineHeight: "1.5em" }}>
+                  <div className="text-gray-500 text-sm leading-relaxed">
                     {desc}
                   </div>
                 </div>
@@ -159,14 +129,9 @@ export default function SignUpPage() {
 
         {/* Bottom */}
         <div
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.08)",
-            paddingTop: "1.5rem",
-            position: "relative",
-            zIndex: 2,
-          }}
+          className="border-t border-white/8 pt-6 relative z-2"
         >
-          <p style={{ color: "#4d585f", fontSize: "0.875rem", margin: 0 }}>
+          <p className="text-gray-500 text-sm m-0">
             Free to start. No credit card required.
           </p>
         </div>
@@ -174,41 +139,25 @@ export default function SignUpPage() {
 
       {/* Right Panel — Form */}
       <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "3rem 2rem",
-          backgroundColor: "#ffffff",
-        }}
+        className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12 bg-white"
       >
-        <div style={{ width: "100%", maxWidth: "420px" }}>
+        <div className="w-full max-w-sm sm:max-w-md">
 
           {/* Mobile logo */}
           <div
-            className="flex lg:hidden"
-            style={{ alignItems: "center", marginBottom: "2.5rem" }}
+            className="flex lg:hidden mb-8"
           >
-            <Image src="/logo-new.png" alt="Astraventa" width={140} height={36} style={{ objectFit: "contain", objectPosition: "left" }} />
+            <Image src="/logo-new.png" alt="Astraventa" width={140} height={36} className="h-9 w-auto object-contain object-left" />
           </div>
 
           {/* Heading */}
-          <div style={{ marginBottom: "2.5rem" }}>
+          <div className="mb-8">
             <h2
-              style={{
-                fontFamily: "'Bricolage Grotesque', sans-serif",
-                fontWeight: 600,
-                fontSize: "2rem",
-                lineHeight: "1.2em",
-                letterSpacing: "-1px",
-                color: "#1d1d1d",
-                margin: "0 0 0.625rem 0",
-              }}
+              className="font-bricolage font-semibold text-2xl sm:text-3xl leading-tight tracking-tight text-gray-900 mb-2"
             >
               Create your account
             </h2>
-            <p style={{ color: "#4d585f", fontSize: "1rem", fontWeight: 500, margin: 0 }}>
+            <p className="text-gray-600 text-base font-medium m-0">
               Get started with FB Sniper today
             </p>
           </div>
@@ -216,16 +165,7 @@ export default function SignUpPage() {
           {/* Error message */}
           {error && (
             <div
-              style={{
-                borderRadius: "0.625rem",
-                backgroundColor: "rgba(245,28,35,0.08)",
-                border: "1px solid rgba(245,28,35,0.2)",
-                color: "#c0392b",
-                padding: "0.875rem 1.25rem",
-                fontSize: "0.9375rem",
-                fontWeight: 500,
-                marginBottom: "1.25rem",
-              }}
+              className="rounded-lg bg-red-50/80 border border-red-200/50 text-red-700 p-3 sm:p-4 text-sm font-medium mb-5"
             >
               {error}
             </div>
@@ -236,10 +176,9 @@ export default function SignUpPage() {
             type="button"
             onClick={handleGoogleSignUp}
             disabled={loading}
-            className="sniper-btn-outline"
-            style={{ marginBottom: "1.5rem" }}
+            className="sniper-btn-outline mb-6"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24">
+            <svg width="20" height="20" viewBox="0 0 24 24" className="flex-shrink-0">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
@@ -249,16 +188,16 @@ export default function SignUpPage() {
           </button>
 
           {/* Divider */}
-          <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
-            <div style={{ flex: 1, height: "1px", backgroundColor: "#dde5ed" }} />
-            <span style={{ color: "#bababa", fontSize: "0.875rem", fontWeight: 500 }}>or</span>
-            <div style={{ flex: 1, height: "1px", backgroundColor: "#dde5ed" }} />
+          <div className="flex items-center gap-4 mb-6">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-gray-500 text-sm font-medium">or</span>
+            <div className="flex-1 h-px bg-gray-200" />
           </div>
 
           {/* Form */}
           <form onSubmit={handleSignUp}>
-            <div style={{ marginBottom: "1rem" }}>
-              <label style={{ display: "block", color: "#1d1d1d", fontSize: "0.9375rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+            <div className="mb-4">
+              <label className="block text-gray-900 text-sm font-semibold mb-2">
                 Full name
               </label>
               <input
@@ -271,8 +210,8 @@ export default function SignUpPage() {
               />
             </div>
 
-            <div style={{ marginBottom: "1rem" }}>
-              <label style={{ display: "block", color: "#1d1d1d", fontSize: "0.9375rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+            <div className="mb-4">
+              <label className="block text-gray-900 text-sm font-semibold mb-2">
                 Email address
               </label>
               <input
@@ -285,8 +224,8 @@ export default function SignUpPage() {
               />
             </div>
 
-            <div style={{ marginBottom: "1.5rem" }}>
-              <label style={{ display: "block", color: "#1d1d1d", fontSize: "0.9375rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+            <div className="mb-6">
+              <label className="block text-gray-900 text-sm font-semibold mb-2">
                 Password
               </label>
               <input

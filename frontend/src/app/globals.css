@@ -171,3 +171,84 @@ body {
 .animate-fade-slide-up {
   animation: fadeSlideUp 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+
+/* ── Mobile Touch Optimizations ───────────────────────────── */
+@media (max-width: 768px) {
+  /* Improve touch targets */
+  button, a, input, textarea, select {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Better scrolling on iOS */
+  body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  
+  /* Prevent zoom on input focus */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  textarea {
+    font-size: 16px;
+  }
+  
+  /* Smooth transitions for mobile */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Better button spacing */
+  .sniper-btn {
+    padding: 1rem 2rem;
+    font-size: 1rem;
+  }
+  
+  /* Mobile-friendly dropdowns */
+  .mobile-dropdown {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: flex-end;
+  }
+  
+  .mobile-dropdown-content {
+    background: white;
+    width: 100%;
+    max-height: 70vh;
+    overflow-y: auto;
+    border-radius: 1rem 1rem 0 0;
+    padding: 1rem;
+  }
+}
+
+/* ── Responsive Grid Helpers ───────────────────────────────── */
+.responsive-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+@media (max-width: 640px) {
+  .responsive-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+}
+
+/* ── Mobile Card Optimizations ───────────────────────────── */
+.mobile-card {
+  @apply rounded-lg border border-gray-200 p-4 bg-white shadow-sm;
+}
+
+@media (max-width: 640px) {
+  .mobile-card {
+    @apply p-3 rounded-md;
+  }
+}

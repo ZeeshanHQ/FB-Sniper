@@ -601,7 +601,9 @@ export default function DashboardPage() {
     );
   }
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const SW = collapsed ? "64px" : "220px";
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   if (loading) {
     return (
@@ -678,18 +680,28 @@ export default function DashboardPage() {
   const progress   = Math.round((doneCount / setupSteps.length) * 100);
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "var(--bg)", fontFamily: "Interdisplay, Arial, sans-serif" }}>
+    <div className="flex min-h-screen bg-[var(--bg)] font-sans" style={{ fontFamily: "Interdisplay, Arial, sans-serif" }}>
+
+      {/* Mobile Menu Overlay */}
+      {isMobile && mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
 
       {/* ─────────────────────── SIDEBAR ─────────────────────── */}
-      <aside style={{
-        width: SW, flexShrink: 0,
-        backgroundColor: "var(--surface)",
-        borderRight: "1px solid var(--border)",
-        display: "flex", flexDirection: "column",
-        position: "fixed", top: 0, left: 0, height: "100vh",
-        zIndex: 50,
-        transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)",
-        overflow: "hidden",
+      <aside className={`
+        ${isMobile ? 'fixed left-0 top-0 h-full z-50 transform transition-transform duration-300' : 'relative'}
+        ${isMobile && !mobileMenuOpen ? '-translate-x-full' : 'translate-x-0'}
+        ${!isMobile ? 'hidden md:flex' : 'flex'}
+        flex-shrink-0 bg-[var(--surface)] border-r border-[var(--border)]
+        flex-col
+        ${!isMobile ? '' : 'w-64'}
+      `}
+      style={{ 
+        width: !isMobile ? SW : undefined,
+        transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)"
       }}>
 
         {/* Logo — dark mode uses white variant */}
@@ -781,16 +793,38 @@ export default function DashboardPage() {
       </aside>
 
       {/* ─────────────────────── MAIN ─────────────────────── */}
-      <main style={{ flex: 1, marginLeft: SW, display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", transition: "margin-left 0.22s cubic-bezier(0.4,0,0.2,1)" }}>
+      <main className={`flex-1 flex flex-col min-h-screen ${!isMobile ? '' : 'ml-0'} transition-all duration-300`} 
+        style={{ 
+          marginLeft: !isMobile ? SW : undefined,
+          minHeight: !isMobile ? '100vh' : undefined
+        }}
+      >
 
-        {/* Top bar */}
-        <header style={{ backgroundColor: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "0 1.75rem", height: "56px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 40 }}>
-          <div>
-            <h1 style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, fontSize: "0.9375rem", color: "var(--text-1)", margin: 0, letterSpacing: "-0.2px" }}>
+        {/* Mobile Header */}
+        {isMobile && (
+          <header className="bg-[var(--surface)] border-b border-[var(--border)] px-4 py-3 flex items-center justify-between md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] flex items-center justify-center text-[var(--text-2)]"
+            >
+              <PanelLeftOpen size={16} strokeWidth={2} />
+            </button>
+            <h1 className="font-bricolage font-semibold text-sm text-[var(--text-1)]">
               {activeNav}
             </h1>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+            <div className="w-8" /> {/* Spacer for centering */}
+          </header>
+        )}
+
+        {/* Desktop Top bar */}
+        {!isMobile && (
+          <header style={{ backgroundColor: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "0 1.75rem", height: "56px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 40 }}>
+            <div>
+              <h1 style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, fontSize: "0.9375rem", color: "var(--text-1)", margin: 0, letterSpacing: "-0.2px" }}>
+                {activeNav}
+              </h1>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
             {/* Bell + notification dropdown */}
             {(() => {
               const unread = notifications.filter(n => !n.read).length;
@@ -961,7 +995,7 @@ export default function DashboardPage() {
         </header>
 
         {/* Page body */}
-        <div style={{ flex: 1, padding: "1.75rem", overflowY: "auto" }}>
+        <div className="flex-1 p-4 sm:p-6 lg:p-7 overflow-y-auto">
           {renderContent()}
         </div>
       </main>

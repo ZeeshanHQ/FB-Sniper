@@ -45,48 +45,47 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "Interdisplay, Arial, sans-serif" }}>
+    <div className="flex min-h-screen font-sans" style={{ fontFamily: "Interdisplay, Arial, sans-serif" }}>
 
       {/* ── Left Panel ── */}
       <div
-        className="hidden lg:flex"
-        style={{ width: "50%", backgroundColor: "#1d1d1d", flexDirection: "column", justifyContent: "space-between", padding: "3rem", position: "relative", overflow: "hidden" }}
+        className="hidden lg:flex lg:w-1/2 bg-gray-900 flex-col justify-between p-8 lg:p-12 relative overflow-hidden"
       >
-        <div style={{ position: "absolute", top: "-100px", right: "-100px", width: "400px", height: "400px", borderRadius: "50%", background: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%)", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", bottom: "-80px", left: "-80px", width: "300px", height: "300px", borderRadius: "50%", background: "radial-gradient(circle, rgba(64,106,228,0.12) 0%, transparent 70%)", pointerEvents: "none" }} />
+        <div className="absolute top-0 right-0 w-96 h-96 rounded-full bg-blue-600/10" style={{ top: "-100px", right: "-100px", width: "400px", height: "400px", background: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%)", pointerEvents: "none" }} />
+        <div className="absolute bottom-0 left-0 w-80 h-80 rounded-full bg-blue-500/10" style={{ bottom: "-80px", left: "-80px", width: "300px", height: "300px", background: "radial-gradient(circle, rgba(64,106,228,0.12) 0%, transparent 70%)", pointerEvents: "none" }} />
 
-        <Image src="/logo-new-white.png" alt="Astraventa" width={160} height={40} style={{ objectFit: "contain", objectPosition: "left" }} />
+        <Image src="/logo-new-white.png" alt="Astraventa" width={160} height={40} className="h-10 w-auto object-contain object-left" />
 
-        <div style={{ position: "relative", zIndex: 2 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", backgroundColor: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "6.25rem", padding: "0.375rem 1rem", marginBottom: "1.5rem" }}>
-            <div style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
-            <span style={{ color: "#dde5ed", fontSize: "0.875rem", fontWeight: 500 }}>FB Sniper — Elite Automation</span>
+        <div className="relative z-2">
+          <div className="inline-flex items-center gap-2 bg-blue-600/15 border border-blue-600/30 rounded-full px-4 py-1.5 mb-6">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            <span className="text-gray-300 text-sm font-medium">FB Sniper — Elite Automation</span>
           </div>
-          <h1 style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, fontSize: "3rem", lineHeight: "1.2em", letterSpacing: "-1px", color: "#ffffff", margin: "0 0 1.25rem 0" }}>
-            Secure access,<br /><span style={{ color: "#3b82f6" }}>zero</span> compromise.
+          <h1 className="font-bricolage font-semibold text-4xl lg:text-5xl leading-tight tracking-tight text-white mb-5">
+            Secure access,<br /><span className="text-blue-500">zero</span> compromise.
           </h1>
-          <p style={{ color: "#bababa", fontSize: "1.125rem", lineHeight: "1.6em", fontWeight: 500, margin: 0, maxWidth: "420px" }}>
+          <p className="text-gray-400 text-lg leading-relaxed font-medium m-0 max-w-md">
             We&apos;ll send a 6-digit code to your inbox. Use it to set a fresh password and get back in.
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "2.5rem", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "2rem", position: "relative", zIndex: 2 }}>
+        <div className="flex gap-8 lg:gap-10 border-t border-white/10 pt-8 relative z-2">
           {[{ number: "60-day", label: "Token lifetime" }, { number: "100%", label: "Isolated data" }, { number: "∞", label: "Scale" }].map((s) => (
             <div key={s.label}>
-              <div style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 700, fontSize: "1.5rem", color: "#ffffff", lineHeight: 1, marginBottom: "0.25rem" }}>{s.number}</div>
-              <div style={{ color: "#4d585f", fontSize: "0.875rem", fontWeight: 500 }}>{s.label}</div>
+              <div className="font-bricolage font-bold text-2xl text-white leading-none mb-1">{s.number}</div>
+              <div className="text-gray-500 text-sm font-medium">{s.label}</div>
             </div>
           ))}
         </div>
       </div>
 
       {/* ── Right Panel ── */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem 2rem", backgroundColor: "#ffffff" }}>
-        <div style={{ width: "100%", maxWidth: "420px" }}>
+      <div className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12 bg-white">
+        <div className="w-full max-w-sm sm:max-w-md">
 
           {/* Mobile logo */}
-          <div className="flex lg:hidden" style={{ alignItems: "center", marginBottom: "2.5rem" }}>
-              <Image src={getResolvedDark() ? "/logo-new-white.png" : "/logo-new.png"} alt="Astraventa" width={140} height={36} style={{ objectFit: "contain", objectPosition: "left" }} />
+          <div className="flex lg:hidden mb-8">
+              <Image src={getResolvedDark() ? "/logo-new-white.png" : "/logo-new.png"} alt="Astraventa" width={140} height={36} className="h-9 w-auto object-contain object-left" />
             </div>
 
           {!sent ? (

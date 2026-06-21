@@ -8,6 +8,7 @@ const bricolage = Bricolage_Grotesque({ subsets: ["latin"], variable: "--font-br
 export const metadata: Metadata = {
   title: "Astraventa FB Sniper",
   description: "Elite multi-tenant Facebook automation platform",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes",
   icons: {
     icon: "/favicon.png",
     shortcut: "/favicon.png",

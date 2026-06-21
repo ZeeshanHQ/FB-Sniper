@@ -79,43 +79,31 @@ export default function SignInPage() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "Interdisplay, Arial, sans-serif" }}>
+    <div className="flex min-h-screen font-sans" style={{ fontFamily: "Interdisplay, Arial, sans-serif" }}>
 
       {/* Left Panel — Dark / Brand */}
       <div
-        style={{
-          width: "50%",
-          backgroundColor: "#1d1d1d",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          padding: "3rem",
-          position: "relative",
-          overflow: "hidden",
-        }}
-        className="hidden lg:flex"
+        className="hidden lg:flex lg:w-1/2 bg-gray-900 flex-col justify-between p-8 lg:p-12 relative overflow-hidden"
       >
         {/* Background decoration */}
         <div
+          className="absolute top-0 right-0 w-96 h-96 rounded-full bg-blue-600/10"
           style={{
-            position: "absolute",
             top: "-100px",
             right: "-100px",
             width: "400px",
             height: "400px",
-            borderRadius: "50%",
             background: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%)",
             pointerEvents: "none",
           }}
         />
         <div
+          className="absolute bottom-0 left-0 w-80 h-80 rounded-full bg-blue-500/10"
           style={{
-            position: "absolute",
             bottom: "-80px",
             left: "-80px",
             width: "300px",
             height: "300px",
-            borderRadius: "50%",
             background: "radial-gradient(circle, rgba(64,106,228,0.12) 0%, transparent 70%)",
             pointerEvents: "none",
           }}
@@ -123,61 +111,32 @@ export default function SignInPage() {
 
         {/* Logo */}
         <div>
-          <Image src="/logo-new-white.png" alt="Astraventa" width={160} height={40} style={{ objectFit: "contain", objectPosition: "left" }} />
+          <Image src="/logo-new-white.png" alt="Astraventa" width={160} height={40} className="h-10 w-auto object-contain object-left" />
         </div>
 
         {/* Hero text */}
-        <div style={{ position: "relative", zIndex: 2 }}>
+        <div className="relative z-2">
           <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              backgroundColor: "rgba(59,130,246,0.15)",
-              border: "1px solid rgba(59,130,246,0.3)",
-              borderRadius: "6.25rem",
-              padding: "0.375rem 1rem",
-              marginBottom: "1.5rem",
-            }}
+            className="inline-flex items-center gap-2 bg-blue-600/15 border border-blue-600/30 rounded-full px-4 py-1.5 mb-6"
           >
             <div
-              style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                backgroundColor: "#10b981",
-              }}
+              className="w-1.5 h-1.5 rounded-full bg-green-500"
             />
-            <span style={{ color: "#dde5ed", fontSize: "0.875rem", fontWeight: 500 }}>
+            <span className="text-gray-300 text-sm font-medium">
               FB Sniper — Elite Automation
             </span>
           </div>
 
           <h1
-            style={{
-              fontFamily: "'Bricolage Grotesque', sans-serif",
-              fontWeight: 600,
-              fontSize: "3rem",
-              lineHeight: "1.2em",
-              letterSpacing: "-1px",
-              color: "#ffffff",
-              margin: "0 0 1.25rem 0",
-            }}
+            className="font-bricolage font-semibold text-4xl lg:text-5xl leading-tight tracking-tight text-white mb-5"
           >
             Automate Facebook.
             <br />
-            <span style={{ color: "#3b82f6" }}>Dominate</span> the feed.
+            <span className="text-blue-500">Dominate</span> the feed.
           </h1>
 
           <p
-            style={{
-              color: "#bababa",
-              fontSize: "1.125rem",
-              lineHeight: "1.6em",
-              fontWeight: 500,
-              margin: 0,
-              maxWidth: "420px",
-            }}
+            className="text-gray-400 text-lg leading-relaxed font-medium m-0 max-w-md"
           >
             Connect your Meta account, define your targets, and let the Sniper Engine handle the rest. Precision automation for elite operators.
           </p>
@@ -185,14 +144,7 @@ export default function SignInPage() {
 
         {/* Bottom stats */}
         <div
-          style={{
-            display: "flex",
-            gap: "2.5rem",
-            borderTop: "1px solid rgba(255,255,255,0.1)",
-            paddingTop: "2rem",
-            position: "relative",
-            zIndex: 2,
-          }}
+          className="flex gap-8 lg:gap-10 border-t border-white/10 pt-8 relative z-2"
         >
           {[
             { number: "60-day", label: "Token lifetime" },
@@ -201,18 +153,11 @@ export default function SignInPage() {
           ].map((stat) => (
             <div key={stat.label}>
               <div
-                style={{
-                  fontFamily: "'Bricolage Grotesque', sans-serif",
-                  fontWeight: 700,
-                  fontSize: "1.5rem",
-                  color: "#ffffff",
-                  lineHeight: 1,
-                  marginBottom: "0.25rem",
-                }}
+                className="font-bricolage font-bold text-2xl text-white leading-none mb-1"
               >
                 {stat.number}
               </div>
-              <div style={{ color: "#4d585f", fontSize: "0.875rem", fontWeight: 500 }}>
+              <div className="text-gray-500 text-sm font-medium">
                 {stat.label}
               </div>
             </div>
@@ -222,47 +167,31 @@ export default function SignInPage() {
 
       {/* Right Panel — Form */}
       <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "3rem 2rem",
-          backgroundColor: "#ffffff",
-        }}
+        className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12 bg-white"
       >
-        <div style={{ width: "100%", maxWidth: "420px" }}>
+        <div className="w-full max-w-sm sm:max-w-md">
 
           {/* Mobile logo */}
           <div
-            className="flex lg:hidden"
-            style={{ alignItems: "center", marginBottom: "2.5rem" }}
+            className="flex lg:hidden mb-8"
           >
             <Image
               src="/logo-new.png"
               alt="Astraventa"
               width={140}
               height={36}
-              style={{ objectFit: "contain", objectPosition: "left" }}
+              className="h-9 w-auto object-contain object-left"
             />
           </div>
 
           {/* Heading */}
-          <div style={{ marginBottom: "2.5rem" }}>
+          <div className="mb-8">
             <h2
-              style={{
-                fontFamily: "'Bricolage Grotesque', sans-serif",
-                fontWeight: 600,
-                fontSize: "2rem",
-                lineHeight: "1.2em",
-                letterSpacing: "-1px",
-                color: "#1d1d1d",
-                margin: "0 0 0.625rem 0",
-              }}
+              className="font-bricolage font-semibold text-2xl sm:text-3xl leading-tight tracking-tight text-gray-900 mb-2"
             >
               Welcome back
             </h2>
-            <p style={{ color: "#4d585f", fontSize: "1rem", fontWeight: 500, margin: 0 }}>
+            <p className="text-gray-600 text-base font-medium m-0">
               Sign in to your Sniper dashboard
             </p>
           </div>
@@ -270,16 +199,7 @@ export default function SignInPage() {
           {/* Error message */}
           {error && (
             <div
-              style={{
-                borderRadius: "0.625rem",
-                backgroundColor: "rgba(245,28,35,0.08)",
-                border: "1px solid rgba(245,28,35,0.2)",
-                color: "#c0392b",
-                padding: "0.875rem 1.25rem",
-                fontSize: "0.9375rem",
-                fontWeight: 500,
-                marginBottom: "1.25rem",
-              }}
+              className="rounded-lg bg-red-50/80 border border-red-200/50 text-red-700 p-3 sm:p-4 text-sm font-medium mb-5"
             >
               {error}
             </div>
@@ -290,10 +210,9 @@ export default function SignInPage() {
             type="button"
             onClick={handleGoogleSignIn}
             disabled={loading}
-            className="sniper-btn-outline"
-            style={{ marginBottom: "1.5rem" }}
+            className="sniper-btn-outline mb-6"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24">
+            <svg width="20" height="20" viewBox="0 0 24 24" className="flex-shrink-0">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
@@ -304,31 +223,20 @@ export default function SignInPage() {
 
           {/* Divider */}
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "1rem",
-              marginBottom: "1.5rem",
-            }}
+            className="flex items-center gap-4 mb-6"
           >
-            <div style={{ flex: 1, height: "1px", backgroundColor: "#dde5ed" }} />
-            <span style={{ color: "#bababa", fontSize: "0.875rem", fontWeight: 500 }}>
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-gray-500 text-sm font-medium">
               or continue with email
             </span>
-            <div style={{ flex: 1, height: "1px", backgroundColor: "#dde5ed" }} />
+            <div className="flex-1 h-px bg-gray-200" />
           </div>
 
           {/* Form */}
           <form onSubmit={handleSignIn}>
-            <div style={{ marginBottom: "1rem" }}>
+            <div className="mb-4">
               <label
-                style={{
-                  display: "block",
-                  color: "#1d1d1d",
-                  fontSize: "0.9375rem",
-                  fontWeight: 600,
-                  marginBottom: "0.5rem",
-                }}
+                className="block text-gray-900 text-sm font-semibold mb-2"
               >
                 Email address
               </label>
@@ -342,25 +250,16 @@ export default function SignInPage() {
               />
             </div>
 
-            <div style={{ marginBottom: "0.75rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <div className="mb-3">
+              <div className="flex justify-between items-center mb-2">
                 <label
-                  style={{
-                    color: "#1d1d1d",
-                    fontSize: "0.9375rem",
-                    fontWeight: 600,
-                  }}
+                  className="text-gray-900 text-sm font-semibold"
                 >
                   Password
                 </label>
                 <Link
                   href="/forgot-password"
-                  style={{
-                    color: "#3b82f6",
-                    fontSize: "0.875rem",
-                    fontWeight: 600,
-                    textDecoration: "none",
-                  }}
+                  className="text-blue-600 text-sm font-semibold hover:text-blue-700 transition-colors"
                 >
                   Forgot password?
                 </Link>
@@ -375,11 +274,11 @@ export default function SignInPage() {
               />
             </div>
 
-            <div style={{ marginBottom: "2rem", marginTop: "1.5rem" }}>
+            <div className="mb-8 mt-6">
               <button
                 type="submit"
                 disabled={loading}
-                className="sniper-btn"
+                className="sniper-btn w-full"
                 style={{ opacity: loading ? 0.6 : 1 }}
               >
                 {loading ? "Signing in…" : "Sign in"}
@@ -389,22 +288,12 @@ export default function SignInPage() {
 
           {/* Sign up link */}
           <p
-            style={{
-              textAlign: "center",
-              color: "#4d585f",
-              fontSize: "0.9375rem",
-              fontWeight: 500,
-              margin: 0,
-            }}
+            className="text-center text-gray-600 text-sm font-medium m-0"
           >
             Don&apos;t have an account?{" "}
             <Link
               href="/signup"
-              style={{
-                color: "#1d1d1d",
-                fontWeight: 700,
-                textDecoration: "none",
-              }}
+              className="text-gray-900 font-bold hover:text-gray-700 transition-colors"
             >
               Create one free
             </Link>
@@ -412,22 +301,12 @@ export default function SignInPage() {
 
           {/* Terms link */}
           <p
-            style={{
-              textAlign: "center",
-              color: "#4d585f",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-              margin: "1rem 0 0 0",
-            }}
+            className="text-center text-gray-500 text-sm font-medium mt-4 mb-0"
           >
             By signing in, you agree to our{" "}
             <Link
               href="/terms"
-              style={{
-                color: "#3b82f6",
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
+              className="text-blue-600 font-semibold hover:text-blue-700 transition-colors"
             >
               Terms of Service
             </Link>
