@@ -60,6 +60,15 @@ class StartSessionRequest(BaseModel):
     timeout_s: int = 180
 
 
+class StoreSessionRequest(BaseModel):
+    user_id: str
+    storage_state: dict          # raw Playwright storage_state (plain JSON from local script)
+    fb_account_name: Optional[str] = None
+    fb_account_id: Optional[str] = None
+    user_agent: Optional[str] = None
+    proxy: Optional[str] = None
+
+
 class SessionRefRequest(BaseModel):
     user_id: str
     session_id: str
@@ -125,6 +134,32 @@ async def start_session(req: StartSessionRequest):
         "status": "active",
         "proxy": req.proxy,
         "user_agent": result.get("user_agent"),
+        "last_validated_at": _now(),
+        "is_active": True,
+    }
+    inserted = sb.table("fb_sessions").insert(row).execute()
+    out = inserted.data[0]
+    out.pop("storage_state", None)
+    return {"success": True, "session": out}
+
+
+@router.post("/session/store")
+async def store_session(req: StoreSessionRequest):
+    """
+    Accept a storage_state captured by the LOCAL login script, encrypt it,
+    and persist to DB. This is the production path when the backend runs on
+    Render (headless server — cannot open a visible browser for login).
+    """
+    encrypted = encrypt_state(req.storage_state)
+    sb = _sb()
+    row = {
+        "user_id": req.user_id,
+        "fb_account_name": req.fb_account_name,
+        "fb_account_id": req.fb_account_id,
+        "storage_state": encrypted,
+        "status": "active",
+        "proxy": req.proxy,
+        "user_agent": req.user_agent or fb_browser.DEFAULT_USER_AGENT,
         "last_validated_at": _now(),
         "is_active": True,
     }

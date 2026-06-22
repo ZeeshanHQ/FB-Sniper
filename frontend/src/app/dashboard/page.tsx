@@ -109,6 +109,8 @@ export default function DashboardPage() {
   // ── Auto-fetch joined groups state ──
   const [fetchingGroups, setFetchingGroups]   = useState(false);
   const [fetchGroupsError, setFetchGroupsError] = useState<string|null>(null);
+  const [showConnectInstructions, setShowConnectInstructions] = useState(false);
+  const [copiedUserId, setCopiedUserId]         = useState(false);
   const [campaignCount, setCampaignCount]   = useState(0);
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [showCalendar, setShowCalendar]     = useState(false);
@@ -1672,19 +1674,16 @@ export default function DashboardPage() {
         } catch {} finally { setSessionsLoading(false); }
       };
 
-      const handleConnectFB = async () => {
+      const handleConnectFB = () => {
+        setShowConnectInstructions(v => !v);
+        setSessionConnectError(null);
+      };
+
+      const handleCopyUserId = () => {
         if (!user?.id) return;
-        setConnectingSession(true); setSessionConnectError(null);
-        try {
-          const r = await fetch(`${apiBase}/api/fb/session/start`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: user.id }),
-          });
-          const d = await r.json();
-          if (d.success) { await loadSessions(); }
-          else setSessionConnectError(d.detail || "Failed to start session.");
-        } catch (e: any) { setSessionConnectError(e.message); }
-        finally { setConnectingSession(false); }
+        navigator.clipboard.writeText(user.id);
+        setCopiedUserId(true);
+        setTimeout(() => setCopiedUserId(false), 2000);
       };
 
       const handleDisconnectSession = async (sid: string) => {
@@ -1764,10 +1763,48 @@ export default function DashboardPage() {
                 <h3 style={h3}>Connected Facebook Accounts</h3>
                 <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: "var(--text-3)", backgroundColor: "var(--hover-bg)", padding: "0.1875rem 0.5rem", borderRadius: "2rem" }}>{fbSessions.length} account{fbSessions.length !== 1 ? "s" : ""}</span>
               </div>
-              <button onClick={handleConnectFB} disabled={connectingSession} style={{ display: "flex", alignItems: "center", gap: "0.375rem", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-1)", fontSize: "0.8125rem", fontWeight: 600, cursor: connectingSession ? "not-allowed" : "pointer", opacity: connectingSession ? 0.6 : 1 }}>
-                {connectingSession ? "Opening browser…" : "Connect Account"}
+              <button onClick={handleConnectFB} style={{ display: "flex", alignItems: "center", gap: "0.375rem", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: showConnectInstructions ? "#1d1d1d" : "var(--surface)", color: showConnectInstructions ? "#fff" : "var(--text-1)", fontSize: "0.8125rem", fontWeight: 600, cursor: "pointer" }}>
+                {showConnectInstructions ? "Hide Instructions" : "Connect Account"}
               </button>
             </div>
+            {/* Local script instructions panel */}
+            {showConnectInstructions && (
+              <div style={{ margin: "1rem 1.375rem", padding: "1.25rem", borderRadius: "0.75rem", backgroundColor: "var(--hover-bg)", border: "1px solid var(--border)" }}>
+                <p style={{ margin: "0 0 0.875rem", fontSize: "0.875rem", fontWeight: 700, color: "var(--text-1)" }}>How to connect your Facebook account</p>
+                <p style={{ margin: "0 0 0.75rem", fontSize: "0.8125rem", color: "var(--text-2)", lineHeight: 1.6 }}>
+                  Because the backend runs on Render (a headless server), Facebook login must be captured on <strong>your local machine</strong> once, then sent to Render automatically.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}>
+                  {[
+                    { n: "1", t: "Install Python + dependencies", code: "pip install playwright requests && playwright install chromium" },
+                    { n: "2", t: "Download the capture script from your repo", code: "tools/fb_login_capture.py" },
+                    { n: "3", t: "Run the script", code: "python fb_login_capture.py" },
+                    { n: "4", t: "Enter your Render URL when prompted", code: process.env.NEXT_PUBLIC_API_URL || "https://your-render-app.onrender.com" },
+                  ].map(({ n, t, code }) => (
+                    <div key={n} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                      <div style={{ width: "22px", height: "22px", borderRadius: "50%", backgroundColor: "#1d1d1d", color: "#fff", fontSize: "0.6875rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "1px" }}>{n}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ margin: "0 0 0.2rem", fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{t}</p>
+                        <code style={{ fontSize: "0.75rem", color: "var(--text-2)", backgroundColor: "var(--surface)", padding: "0.2rem 0.5rem", borderRadius: "0.3rem", border: "1px solid var(--border)", display: "inline-block", wordBreak: "break-all" }}>{code}</code>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                    <div style={{ width: "22px", height: "22px", borderRadius: "50%", backgroundColor: "#1d1d1d", color: "#fff", fontSize: "0.6875rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "1px" }}>5</div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ margin: "0 0 0.2rem", fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>Enter your User ID when prompted</p>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <code style={{ fontSize: "0.75rem", color: "var(--text-2)", backgroundColor: "var(--surface)", padding: "0.2rem 0.5rem", borderRadius: "0.3rem", border: "1px solid var(--border)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.id || "—"}</code>
+                        <button onClick={handleCopyUserId} style={{ padding: "0.25rem 0.625rem", borderRadius: "0.375rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-1)", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{copiedUserId ? "Copied ✓" : "Copy ID"}</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-3)", lineHeight: 1.5 }}>After the script completes, click <strong>Refresh</strong> below to see your account appear.</p>
+                <button onClick={loadSessions} style={{ marginTop: "0.75rem", padding: "0.375rem 0.875rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-1)", fontSize: "0.8125rem", fontWeight: 600, cursor: "pointer" }}>Refresh Sessions</button>
+              </div>
+            )}
+
             {sessionConnectError && (
               <div style={{ margin: "0.75rem 1.375rem", padding: "0.625rem 0.875rem", borderRadius: "0.5rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", fontSize: "0.8125rem", color: "#991b1b" }}>
                 {sessionConnectError}
