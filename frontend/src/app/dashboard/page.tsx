@@ -111,6 +111,9 @@ export default function DashboardPage() {
   const [fetchGroupsError, setFetchGroupsError] = useState<string|null>(null);
   const [showConnectInstructions, setShowConnectInstructions] = useState(false);
   const [copiedUserId, setCopiedUserId]         = useState(false);
+  // ── noVNC live login modal ──
+  const [loginModal, setLoginModal]             = useState<{token:string;novncUrl:string}|null>(null);
+  const [loginPollStatus, setLoginPollStatus]   = useState<"waiting"|"done"|"error"|null>(null);
   const [campaignCount, setCampaignCount]   = useState(0);
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [showCalendar, setShowCalendar]     = useState(false);
@@ -1674,9 +1677,45 @@ export default function DashboardPage() {
         } catch {} finally { setSessionsLoading(false); }
       };
 
-      const handleConnectFB = () => {
-        setShowConnectInstructions(v => !v);
-        setSessionConnectError(null);
+      const loginServiceBase = process.env.NEXT_PUBLIC_LOGIN_SERVICE_URL || "";
+
+      const handleConnectFB = async () => {
+        if (!user?.id) return;
+        // If login service is configured, use live noVNC iframe modal
+        if (loginServiceBase) {
+          setConnectingSession(true); setSessionConnectError(null);
+          try {
+            const r = await fetch(`${loginServiceBase}/start-login`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ user_id: user.id }),
+            });
+            const d = await r.json();
+            if (d.success) {
+              setLoginModal({ token: d.token, novncUrl: `${loginServiceBase}${d.novnc_url}` });
+              setLoginPollStatus("waiting");
+              // Poll for completion
+              const poll = setInterval(async () => {
+                try {
+                  const sr = await fetch(`${loginServiceBase}/login-status/${d.token}`);
+                  const sd = await sr.json();
+                  if (sd.status === "done") {
+                    clearInterval(poll);
+                    setLoginPollStatus("done");
+                    setTimeout(() => { setLoginModal(null); setLoginPollStatus(null); loadSessions(); }, 2500);
+                  } else if (sd.status === "expired" || sd.status === "error") {
+                    clearInterval(poll);
+                    setLoginPollStatus("error");
+                  }
+                } catch {}
+              }, 3000);
+            } else { setSessionConnectError(d.detail || "Failed to start login service."); }
+          } catch (e: any) { setSessionConnectError("Login service unreachable. See instructions below."); setShowConnectInstructions(true); }
+          finally { setConnectingSession(false); }
+        } else {
+          // Fallback: show manual script instructions
+          setShowConnectInstructions(v => !v);
+          setSessionConnectError(null);
+        }
       };
 
       const handleCopyUserId = () => {
@@ -1755,6 +1794,24 @@ export default function DashboardPage() {
               <Plus size={14} strokeWidth={2.5} />{showAddGroupForm ? "Cancel" : "Add Group"}
             </button>
           </div>
+
+          {/* ── noVNC Login Modal ── */}
+          {loginModal && (
+            <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+              <div style={{ width: "100%", maxWidth: "900px", backgroundColor: "#111", borderRadius: "1rem", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.5)" }}>
+                <div style={{ padding: "0.875rem 1.25rem", backgroundColor: "#1d1d1d", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: loginPollStatus === "done" ? "#10b981" : loginPollStatus === "error" ? "#ef4444" : "#f59e0b", animation: loginPollStatus === "waiting" ? "pulse 1.5s infinite" : "none" }} />
+                    <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "#fff" }}>
+                      {loginPollStatus === "done" ? "✅ Connected! Closing…" : loginPollStatus === "error" ? "Session expired — please try again" : "Log into Facebook in the window below"}
+                    </span>
+                  </div>
+                  <button onClick={() => { setLoginModal(null); setLoginPollStatus(null); }} style={{ background: "none", border: "none", color: "#9ca3af", fontSize: "1.25rem", cursor: "pointer", lineHeight: 1 }}>✕</button>
+                </div>
+                <iframe src={loginModal.novncUrl} style={{ width: "100%", height: "560px", border: "none", display: "block" }} allow="clipboard-read; clipboard-write" />
+              </div>
+            </div>
+          )}
 
           {/* ── Step 1: Connect Facebook Session ── */}
           <div style={{ ...card, marginBottom: "1.25rem", overflow: "hidden" }}>
