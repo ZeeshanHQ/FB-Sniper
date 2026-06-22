@@ -169,3 +169,86 @@ async def send_otp_email(to_email: str, otp_code: str, full_name: str = "") -> b
         return response.status_code in (200, 201)
     except Exception:
         return False
+
+
+async def send_session_expired_email(
+    to_email: str,
+    full_name: str = "",
+    fb_account_name: str = "",
+    dashboard_url: str = "https://fb-sniper.vercel.app/dashboard",
+) -> bool:
+    display_name = full_name.split()[0] if full_name else "there"
+    account_label = f" (<strong>{fb_account_name}</strong>)" if fb_account_name else ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:48px 16px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:480px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:#1d1d1d;padding:36px 40px;text-align:center;">
+            <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Astraventa</div>
+            <div style="font-size:13px;color:#9ca3af;margin-top:4px;">FB Sniper Platform</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px;">
+            <p style="margin:0 0 6px;font-size:17px;font-weight:600;color:#1d1d1d;">Hey {display_name},</p>
+            <p style="margin:0 0 24px;font-size:15px;color:#4d585f;line-height:1.6;">
+              Your Facebook session{account_label} has <strong style="color:#ef4444;">expired or been disconnected</strong>.
+              Your scheduled campaigns targeting groups with this account have been paused.
+            </p>
+            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:20px 24px;margin-bottom:28px;">
+              <p style="margin:0;font-size:14px;color:#92400e;line-height:1.6;">
+                &#9888;&nbsp; This can happen when Facebook logs out the session due to a password change,
+                a security checkpoint, or natural cookie expiry. Simply reconnect to resume automation.
+              </p>
+            </div>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
+              <tr>
+                <td style="background:#1d1d1d;border-radius:10px;padding:14px 32px;text-align:center;">
+                  <a href="{dashboard_url}" style="font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;display:inline-block;">
+                    Reconnect Facebook &rarr;
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0;font-size:13px;color:#bababa;line-height:1.6;">
+              Go to <strong>Dashboard &rarr; Groups &rarr; Connect Facebook Account</strong> and log in again.
+              It only takes a moment.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f9fafb;border-top:1px solid #edf1f4;padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#bababa;">
+              &copy; 2025 Astraventa &nbsp;&middot;&nbsp; astraventa.com
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": f"Astraventa <{FROM_EMAIL}>",
+                    "to": [to_email],
+                    "subject": "Action required — Reconnect your Facebook account",
+                    "html": html,
+                },
+            )
+        return response.status_code in (200, 201)
+    except Exception:
+        return False

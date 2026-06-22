@@ -24,6 +24,7 @@ Env vars (all optional, sensible defaults):
 import asyncio
 import logging
 import os
+import random
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -111,12 +112,12 @@ async def _get_user_token(sb: Client, user_id: str) -> Optional[str]:
 
 async def _resolve_target_groups(sb: Client, user_id: str,
                                   group_uuids: List[str]) -> List[Dict]:
-    """Resolve target_group UUIDs → rows with name + url."""
+    """Resolve target_group UUIDs → rows with name, url, session_id, fb_group_id."""
     if not group_uuids:
         return []
     result = await _db(lambda: (
         sb.table("target_groups")
-        .select("id, name, url")
+        .select("id, name, url, session_id, fb_group_id")
         .eq("user_id", user_id)
         .in_("id", group_uuids)
         .execute()
@@ -331,6 +332,91 @@ async def _get_page_token(meta_api, user_token: str, page_id: str) -> Optional[s
     except Exception as exc:
         logger.warning(f"[Worker] Could not fetch page token for {page_id}: {exc}")
     return None
+
+
+# ── Playwright group posting ─────────────────────────────────────────────────
+
+async def _playwright_post_to_groups(
+    sb: Client,
+    user_id: str,
+    target_groups: List[Dict],
+    content: str,
+    media_url: Optional[str],
+) -> List[Dict[str, Optional[str]]]:
+    """
+    Post to groups using Playwright (replaces dead Graph API).
+    Each group row must have a session_id. Groups sharing the same session
+    are batched under one browser context load.
+    Returns [{post_id, page_id}] — post_id is the group URL (no FB post id
+    available from browser automation), page_id is None.
+    """
+    from app.services.fb_browser import post_to_group, SessionConfig, DEFAULT_USER_AGENT
+    from app.services.crypto import decrypt_state
+
+    headless = os.getenv("FB_BROWSER_HEADLESS", "true").lower() != "false"
+    created: List[Dict[str, Optional[str]]] = []
+
+    # Group rows by session_id so we load each session once.
+    sessions_needed: Dict[str, List[Dict]] = {}
+    for g in target_groups:
+        sid = g.get("session_id")
+        if not sid:
+            logger.warning(f"[Worker] Group '{g.get('name')}' has no session — skipping.")
+            continue
+        sessions_needed.setdefault(sid, []).append(g)
+
+    for session_id, groups in sessions_needed.items():
+        # Load + decrypt session
+        s_res = await _db(lambda: (
+            sb.table("fb_sessions")
+            .select("storage_state, user_agent, proxy, status")
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        ))
+        rows = s_res.data or []
+        if not rows:
+            logger.warning(f"[Worker] Session {session_id} not found — skipping groups.")
+            continue
+        srow = rows[0]
+        if srow.get("status") in ("expired", "invalid"):
+            logger.warning(f"[Worker] Session {session_id} is {srow['status']} — skipping groups.")
+            continue
+        try:
+            state = decrypt_state(srow["storage_state"])
+        except Exception as exc:
+            logger.error(f"[Worker] Cannot decrypt session {session_id}: {exc}")
+            continue
+
+        cfg = SessionConfig(
+            user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
+            proxy=srow.get("proxy"),
+        )
+
+        for g in groups:
+            group_url = g.get("url", "")
+            if not group_url:
+                logger.warning(f"[Worker] Group '{g.get('name')}' has no URL — skipping.")
+                continue
+            result = await post_to_group(
+                group_url=group_url,
+                content=content,
+                storage_state=state,
+                image_path=None,   # media_url → download first if needed
+                cfg=cfg,
+                headless=headless,
+            )
+            if result.get("success"):
+                label = "(pending approval)" if result.get("pending_approval") else "(posted)"
+                created.append({"post_id": group_url, "page_id": None})
+                logger.info(f"[Worker] Playwright posted to '{g.get('name')}' {label}")
+            else:
+                logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {result.get('error')}")
+            # Human-paced inter-group delay
+            await asyncio.sleep(random.uniform(8, 18))
+
+    return created
 
 
 # ── Action executors ──────────────────────────────────────────────────────────
@@ -617,10 +703,22 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
         if action_type == "Post to group/page":
             if not content:
                 raise RuntimeError("Post content is empty.")
-            post_targets = await _execute_post(
-                meta_api, token, target_groups, target_page_ids,
-                content, metadata.get("media_url"),
-            )
+            # Groups → Playwright browser automation (Graph API deprecated Apr 2024)
+            # Pages  → Graph API (still works with pages_manage_posts permission)
+            pw_groups = [g for g in target_groups if g.get("session_id")]
+            api_groups = [g for g in target_groups if not g.get("session_id")]
+            post_targets: List[Dict[str, Optional[str]]] = []
+            if pw_groups:
+                pw_results = await _playwright_post_to_groups(
+                    sb, user_id, pw_groups, content, metadata.get("media_url"),
+                )
+                post_targets.extend(pw_results)
+            if api_groups or target_page_ids:
+                api_results = await _execute_post(
+                    meta_api, token, api_groups, target_page_ids,
+                    content, metadata.get("media_url"),
+                )
+                post_targets.extend(api_results)
             post_ids = [t["post_id"] for t in post_targets]
             result_detail = (
                 f"Posted to {len(post_ids)} target(s). "
@@ -861,3 +959,91 @@ async def worker_loop() -> None:
             logger.error(f"[Worker] Poll loop error: {exc}", exc_info=True)
 
         await asyncio.sleep(POLL_INTERVAL)
+
+
+# ── Session health-check loop ─────────────────────────────────────────────────
+# Runs every SESSION_CHECK_INTERVAL seconds (default 6 hours).
+# Marks expired sessions and e-mails the account owner once per expiry.
+
+SESSION_CHECK_INTERVAL = int(os.getenv("SESSION_CHECK_INTERVAL", str(6 * 60 * 60)))
+
+
+async def session_health_loop() -> None:
+    """Background loop that validates stored FB sessions and notifies on expiry."""
+    from app.services.fb_browser import validate_session, SessionConfig, DEFAULT_USER_AGENT
+    from app.services.crypto import decrypt_state
+    from app.services.email import send_session_expired_email
+
+    logger.info(f"[SessionHealth] Started — check interval={SESSION_CHECK_INTERVAL}s")
+    sb = _make_client()
+
+    while True:
+        try:
+            res = await _db(lambda: (
+                sb.table("fb_sessions")
+                .select("id, user_id, fb_account_name, storage_state, user_agent, proxy, status")
+                .eq("is_active", True)
+                .neq("status", "expired")
+                .neq("status", "invalid")
+                .execute()
+            ))
+            sessions = res.data or []
+            logger.info(f"[SessionHealth] Checking {len(sessions)} active session(s)")
+
+            for srow in sessions:
+                sid = srow["id"]
+                uid = srow["user_id"]
+                try:
+                    state = decrypt_state(srow["storage_state"])
+                except Exception:
+                    continue
+
+                cfg = SessionConfig(
+                    user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
+                    proxy=srow.get("proxy"),
+                )
+                result = await validate_session(state, cfg=cfg)
+                if result.get("valid"):
+                    await _db(lambda: (
+                        sb.table("fb_sessions")
+                        .update({"status": "active", "last_validated_at": datetime.now(timezone.utc).isoformat(), "last_error": None})
+                        .eq("id", sid)
+                        .execute()
+                    ))
+                    continue
+
+                # Session is dead → mark + notify
+                await _db(lambda: (
+                    sb.table("fb_sessions")
+                    .update({"status": "expired", "last_validated_at": datetime.now(timezone.utc).isoformat(), "last_error": result.get("reason")})
+                    .eq("id", sid)
+                    .execute()
+                ))
+                logger.warning(f"[SessionHealth] Session {sid} expired — notifying user {uid}")
+
+                # Fetch user email
+                u_res = await _db(lambda: (
+                    sb.table("users")
+                    .select("email, full_name")
+                    .eq("id", uid)
+                    .limit(1)
+                    .execute()
+                ))
+                u_rows = u_res.data or []
+                if u_rows:
+                    await send_session_expired_email(
+                        to_email=u_rows[0]["email"],
+                        full_name=u_rows[0].get("full_name") or "",
+                        fb_account_name=srow.get("fb_account_name") or "",
+                    )
+                    await _notify(sb, uid, "action_failed",
+                                  "Facebook session expired",
+                                  f"Your Facebook session{' for ' + srow['fb_account_name'] if srow.get('fb_account_name') else ''} has expired. Please reconnect in Groups settings.")
+
+        except asyncio.CancelledError:
+            logger.info("[SessionHealth] Shutting down")
+            raise
+        except Exception as exc:
+            logger.error(f"[SessionHealth] Error: {exc}", exc_info=True)
+
+        await asyncio.sleep(SESSION_CHECK_INTERVAL)

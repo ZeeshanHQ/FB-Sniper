@@ -4,8 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, sniper
-from app.services.worker import worker_loop
+from app.api import auth, sniper, fb
+from app.services.worker import worker_loop, session_health_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,17 +18,19 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start campaign worker on boot; cancel it cleanly on shutdown."""
-    task = asyncio.create_task(worker_loop(), name="campaign-worker")
-    logger.info("[Startup] Campaign worker task created")
+    task   = asyncio.create_task(worker_loop(),        name="campaign-worker")
+    health = asyncio.create_task(session_health_loop(), name="session-health")
+    logger.info("[Startup] Campaign worker + session health loop started")
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        logger.info("[Shutdown] Campaign worker stopped")
+        for t in (task, health):
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+        logger.info("[Shutdown] All background tasks stopped")
 
 
 app = FastAPI(
@@ -50,6 +52,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sniper.router, prefix="/api/sniper", tags=["sniper"])
+app.include_router(fb.router, prefix="/api/fb", tags=["fb"])
 
 @app.get("/")
 async def root():

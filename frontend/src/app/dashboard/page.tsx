@@ -9,7 +9,7 @@ import {
   Activity, CheckCircle2, Zap, ArrowUpRight,
   FileText, AlertCircle, PanelLeftClose, PanelLeftOpen,
   Sun, Moon, Monitor, Plus, Send, Link2, Calendar,
-  XCircle, TrendingDown, Trash2, Play, Hash, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare,
+  XCircle, TrendingDown, Trash2, Play, Hash, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, User,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -74,7 +74,6 @@ export default function DashboardPage() {
   const [theme, setTheme]                   = useState<Theme>("system");
   const [resolvedDark, setResolvedDark]     = useState(false);
   const [showSniperForm, setShowSniperForm] = useState(false);
-  const [comingSoonGroup, setComingSoonGroup] = useState(false);
   const [showPageForm, setShowPageForm]     = useState(false);
   const [queueFilter, setQueueFilter]       = useState<"all"|"pending"|"sent"|"failed">("all");
   const [metaToken, setMetaToken]           = useState("");
@@ -94,7 +93,22 @@ export default function DashboardPage() {
   const activeToken = targetAccountToken || (connectedAccounts.length > 0 ? connectedAccounts[0].access_token : null);
   const fbPages = connectedAccounts.find(a => a.access_token === activeToken)?.pages || [];
   const pagesLoading = accountsLoading;
-  const [groups, setGroups]                 = useState<{id:string;name:string;url:string}[]>([]);
+  const [groups, setGroups]                 = useState<{id:string;name:string;url:string;validation_status?:string;privacy?:string;is_member?:boolean;can_post?:boolean;requires_approval?:boolean;session_id?:string}[]>([]);
+  // ── FB Session state ──
+  const [fbSessions, setFbSessions]         = useState<{id:string;fb_account_name:string|null;fb_account_id:string|null;status:string;last_validated_at:string|null}[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [connectingSession, setConnectingSession] = useState(false);
+  const [sessionConnectError, setSessionConnectError] = useState<string|null>(null);
+  // ── Add-group form state ──
+  const [showAddGroupForm, setShowAddGroupForm] = useState(false);
+  const [addGroupUrl, setAddGroupUrl]         = useState("");
+  const [addGroupName, setAddGroupName]       = useState("");
+  const [addGroupSession, setAddGroupSession] = useState("");
+  const [addGroupLoading, setAddGroupLoading] = useState(false);
+  const [addGroupResult, setAddGroupResult]   = useState<{ok:boolean;msg:string;data?:Record<string,unknown>}|null>(null);
+  // ── Auto-fetch joined groups state ──
+  const [fetchingGroups, setFetchingGroups]   = useState(false);
+  const [fetchGroupsError, setFetchGroupsError] = useState<string|null>(null);
   const [campaignCount, setCampaignCount]   = useState(0);
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [showCalendar, setShowCalendar]     = useState(false);
@@ -241,7 +255,7 @@ export default function DashboardPage() {
 
       // Load groups from Supabase
       supabase.from("target_groups")
-        .select("id, name, url")
+        .select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id")
         .eq("user_id", u.id)
         .eq("is_active", true)
         .order("created_at", { ascending: true })
@@ -444,6 +458,24 @@ export default function DashboardPage() {
       .then(({ data }) => setAnalyticsLogs(data ?? []))
       .finally(() => setAnalyticsLoading(false));
   }, [activeNav, user?.id]);
+
+  // Load FB sessions + groups when Groups nav is active
+  useEffect(() => {
+    if (activeNav !== "Groups" || !user?.id) return;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    setSessionsLoading(true);
+    fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setFbSessions(d.sessions || []); })
+      .catch(() => {})
+      .finally(() => setSessionsLoading(false));
+    supabase.from("target_groups")
+      .select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true })
+      .then(({ data }) => { if (data) setGroups(data); });
+  }, [activeNav, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pages are now fetched concurrently alongside user info.
 
@@ -1627,64 +1659,242 @@ export default function DashboardPage() {
     );
 
     // ── GROUPS ────────────────────────────────────────────────────────────────
-    if (activeNav === "Groups") return (
-      <>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-          <div>
-            <h2 style={{ margin: "0 0 0.25rem", fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 700, fontSize: "1.25rem", color: "var(--text-1)", letterSpacing: "-0.4px" }}>Groups</h2>
-            <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-2)" }}>Facebook groups you are targeting</p>
-          </div>
-          <div style={{ position: "relative" }}>
-            <button 
-              onClick={() => { setComingSoonGroup(true); setTimeout(() => setComingSoonGroup(false), 2000); }} 
-              style={{ ...btnPrimary }}
-            >
-              <Plus size={14} strokeWidth={2.5} />Add Group
+    if (activeNav === "Groups") {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+      const loadSessions = async () => {
+        if (!user?.id) return;
+        setSessionsLoading(true);
+        try {
+          const r = await fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`);
+          const d = await r.json();
+          if (d.success) setFbSessions(d.sessions || []);
+        } catch {} finally { setSessionsLoading(false); }
+      };
+
+      const handleConnectFB = async () => {
+        if (!user?.id) return;
+        setConnectingSession(true); setSessionConnectError(null);
+        try {
+          const r = await fetch(`${apiBase}/api/fb/session/start`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: user.id }),
+          });
+          const d = await r.json();
+          if (d.success) { await loadSessions(); }
+          else setSessionConnectError(d.detail || "Failed to start session.");
+        } catch (e: any) { setSessionConnectError(e.message); }
+        finally { setConnectingSession(false); }
+      };
+
+      const handleDisconnectSession = async (sid: string) => {
+        if (!user?.id) return;
+        await fetch(`${apiBase}/api/fb/session/disconnect`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.id, session_id: sid }),
+        });
+        setFbSessions(prev => prev.filter(s => s.id !== sid));
+      };
+
+      const handleFetchGroups = async (sid: string) => {
+        if (!user?.id) return;
+        setFetchingGroups(true); setFetchGroupsError(null);
+        try {
+          const r = await fetch(`${apiBase}/api/fb/groups/fetch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: user.id, session_id: sid, persist: true }),
+          });
+          const d = await r.json();
+          if (d.success) {
+            const { data: gData } = await supabase.from("target_groups").select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id").eq("user_id", user.id).eq("is_active", true);
+            if (gData) setGroups(gData);
+          } else setFetchGroupsError(d.detail || "Failed to fetch groups.");
+        } catch (e: any) { setFetchGroupsError(e.message); }
+        finally { setFetchingGroups(false); }
+      };
+
+      const handleAddGroup = async () => {
+        if (!addGroupUrl.trim() || !addGroupSession) return;
+        setAddGroupLoading(true); setAddGroupResult(null);
+        try {
+          const r = await fetch(`${apiBase}/api/fb/groups/validate`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: user?.id, session_id: addGroupSession, url: addGroupUrl.trim(), name: addGroupName.trim() || undefined, persist: true }),
+          });
+          const d = await r.json();
+          if (d.success) {
+            const v = d.validation || {};
+            const canPost = v.exists && v.can_post;
+            setAddGroupResult({ ok: canPost, msg: canPost ? `✓ Group verified — ${v.privacy || "unknown"} group, you are a member${v.requires_approval ? " (posts need admin approval)" : ""}.` : `✗ ${!v.exists ? "Group not found or URL is invalid." : !v.is_member ? "You are not a member of this group." : "Cannot post in this group."}` });
+            if (canPost) {
+              const { data: gData } = await supabase.from("target_groups").select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id").eq("user_id", user?.id || "").eq("is_active", true);
+              if (gData) setGroups(gData);
+              setAddGroupUrl(""); setAddGroupName("");
+            }
+          } else { setAddGroupResult({ ok: false, msg: d.detail || "Validation failed." }); }
+        } catch (e: any) { setAddGroupResult({ ok: false, msg: e.message }); }
+        finally { setAddGroupLoading(false); }
+      };
+
+      const getStatusBadge = (g: typeof groups[0]) => {
+        const s = g.validation_status;
+        if (s === "valid" && g.can_post) return { bg: "#f0fdf4", border: "#bbf7d0", dot: "#10b981", text: "#166534", label: "Active" };
+        if (s === "invalid") return { bg: "#fef2f2", border: "#fecaca", dot: "#ef4444", text: "#991b1b", label: "Invalid" };
+        if (g.requires_approval) return { bg: "#fffbeb", border: "#fde68a", dot: "#f59e0b", text: "#92400e", label: "Pending Approval" };
+        return { bg: "var(--hover-bg)", border: "var(--border)", dot: "#9ca3af", text: "var(--text-2)", label: "Unverified" };
+      };
+
+      return (
+        <>
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+            <div>
+              <h2 style={{ margin: "0 0 0.25rem", fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 700, fontSize: "1.25rem", color: "var(--text-1)", letterSpacing: "-0.4px" }}>Groups</h2>
+              <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-2)" }}>Manage Facebook groups for browser-based posting</p>
+            </div>
+            <button onClick={() => { setShowAddGroupForm(v => !v); setAddGroupResult(null); }} style={{ ...btnPrimary }}>
+              <Plus size={14} strokeWidth={2.5} />{showAddGroupForm ? "Cancel" : "Add Group"}
             </button>
-            {comingSoonGroup && (
-              <div style={{ position: "absolute", top: "115%", right: 0, padding: "0.4rem 0.75rem", backgroundColor: "#1d1d1d", color: "#fff", fontSize: "0.75rem", fontWeight: 600, borderRadius: "0.5rem", whiteSpace: "nowrap", zIndex: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", animation: "fadeIn 0.2s ease" }}>
-                Coming soon ✨
+          </div>
+
+          {/* ── Step 1: Connect Facebook Session ── */}
+          <div style={{ ...card, marginBottom: "1.25rem", overflow: "hidden" }}>
+            <div style={{ padding: "1rem 1.375rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                <h3 style={h3}>Connected Facebook Accounts</h3>
+                <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: "var(--text-3)", backgroundColor: "var(--hover-bg)", padding: "0.1875rem 0.5rem", borderRadius: "2rem" }}>{fbSessions.length} account{fbSessions.length !== 1 ? "s" : ""}</span>
+              </div>
+              <button onClick={handleConnectFB} disabled={connectingSession} style={{ display: "flex", alignItems: "center", gap: "0.375rem", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-1)", fontSize: "0.8125rem", fontWeight: 600, cursor: connectingSession ? "not-allowed" : "pointer", opacity: connectingSession ? 0.6 : 1 }}>
+                {connectingSession ? "Opening browser…" : "Connect Account"}
+              </button>
+            </div>
+            {sessionConnectError && (
+              <div style={{ margin: "0.75rem 1.375rem", padding: "0.625rem 0.875rem", borderRadius: "0.5rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", fontSize: "0.8125rem", color: "#991b1b" }}>
+                {sessionConnectError}
               </div>
             )}
+            {sessionsLoading ? (
+              <div style={{ padding: "1.5rem", textAlign: "center", fontSize: "0.8125rem", color: "var(--text-3)" }}>Loading sessions…</div>
+            ) : fbSessions.length === 0 ? (
+              <div style={{ padding: "2rem 1.375rem", textAlign: "center" }}>
+                <div style={{ width: "40px", height: "40px", borderRadius: "50%", backgroundColor: "var(--hover-bg)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 0.75rem" }}>
+                  <Users size={18} color="#9ca3af" strokeWidth={2} />
+                </div>
+                <p style={{ margin: "0 0 0.25rem", fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)" }}>No Facebook account connected</p>
+                <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-2)" }}>Click "Connect Account" — a browser will open for you to log in once.</p>
+              </div>
+            ) : (
+              fbSessions.map(s => {
+                const isActive = s.status === "active";
+                const isExpired = s.status === "expired" || s.status === "invalid";
+                return (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.875rem 1.375rem", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                      <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: isExpired ? "#fef2f2" : "#eff6ff", border: `1px solid ${isExpired ? "#fecaca" : "#bfdbfe"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <User size={16} color={isExpired ? "#ef4444" : "#3b82f6"} strokeWidth={2} />
+                      </div>
+                      <div>
+                        <p style={{ margin: 0, fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)" }}>{s.fb_account_name || "Facebook Account"}</p>
+                        <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-3)" }}>ID: {s.fb_account_id || "—"} &nbsp;·&nbsp; {s.last_validated_at ? `Checked ${new Date(s.last_validated_at).toLocaleDateString()}` : "Never checked"}</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", padding: "0.1875rem 0.625rem", borderRadius: "2rem", backgroundColor: isExpired ? "#fef2f2" : isActive ? "#f0fdf4" : "#fffbeb", border: `1px solid ${isExpired ? "#fecaca" : isActive ? "#bbf7d0" : "#fde68a"}` }}>
+                        <div style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: isExpired ? "#ef4444" : isActive ? "#10b981" : "#f59e0b" }} />
+                        <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: isExpired ? "#991b1b" : isActive ? "#166534" : "#92400e" }}>{isExpired ? "Expired" : isActive ? "Active" : s.status}</span>
+                      </div>
+                      {isExpired && (
+                        <button onClick={handleConnectFB} style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", border: "1px solid #fecaca", backgroundColor: "#fef2f2", color: "#ef4444", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}>Reconnect</button>
+                      )}
+                      <button onClick={() => handleFetchGroups(s.id)} disabled={fetchingGroups || !isActive} style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-2)", fontSize: "0.75rem", fontWeight: 600, cursor: (!isActive || fetchingGroups) ? "not-allowed" : "pointer", opacity: (!isActive || fetchingGroups) ? 0.5 : 1 }}>
+                        {fetchingGroups ? "Fetching…" : "Auto-fetch Groups"}
+                      </button>
+                      <button onClick={() => handleDisconnectSession(s.id)} style={{ padding: "0.375rem 0.625rem", borderRadius: "0.5rem", border: "1px solid #fecaca", backgroundColor: "transparent", color: "#ef4444", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}>Disconnect</button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            {fetchGroupsError && (
+              <div style={{ margin: "0.75rem 1.375rem", padding: "0.625rem 0.875rem", borderRadius: "0.5rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", fontSize: "0.8125rem", color: "#991b1b" }}>{fetchGroupsError}</div>
+            )}
           </div>
-        </div>
 
-        <div style={{ ...card, overflow: "hidden" }}>
-          <div style={{ padding: "1.125rem 1.375rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <h3 style={h3}>Your Groups</h3>
-            <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: "var(--text-3)", backgroundColor: "var(--hover-bg)", padding: "0.1875rem 0.5rem", borderRadius: "2rem" }}>{groups.length} groups</span>
-          </div>
-          {groups.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 90px 100px 80px", padding: "0.5rem 1.375rem", borderBottom: "1px solid var(--border)" }}>
-              {["Group Name","URL / ID","Members","Status","Actions"].map(h => <span key={h} style={label}>{h}</span>)}
+          {/* ── Step 2: Add group by URL ── */}
+          {showAddGroupForm && (
+            <div style={{ ...card, marginBottom: "1.25rem", padding: "1.25rem 1.375rem" }}>
+              <h3 style={{ ...h3, marginBottom: "1rem" }}>Add Group by URL</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                  <label style={{ ...label }}>Facebook Group URL</label>
+                  <input value={addGroupUrl} onChange={e => setAddGroupUrl(e.target.value)} placeholder="https://www.facebook.com/groups/your-group-slug" style={{ padding: "0.625rem 0.875rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.875rem", outline: "none" }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                  <label style={{ ...label }}>Group Name (optional)</label>
+                  <input value={addGroupName} onChange={e => setAddGroupName(e.target.value)} placeholder="e.g. My Marketing Group" style={{ padding: "0.625rem 0.875rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.875rem", outline: "none" }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                  <label style={{ ...label }}>Facebook Account Session</label>
+                  <select value={addGroupSession} onChange={e => setAddGroupSession(e.target.value)} style={{ padding: "0.625rem 0.875rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.875rem", outline: "none" }}>
+                    <option value="">— Select account —</option>
+                    {fbSessions.filter(s => s.status === "active").map(s => (
+                      <option key={s.id} value={s.id}>{s.fb_account_name || "Facebook Account"} ({s.fb_account_id})</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={handleAddGroup} disabled={addGroupLoading || !addGroupUrl.trim() || !addGroupSession} style={{ ...btnPrimary, opacity: (addGroupLoading || !addGroupUrl.trim() || !addGroupSession) ? 0.6 : 1, cursor: (addGroupLoading || !addGroupUrl.trim() || !addGroupSession) ? "not-allowed" : "pointer", alignSelf: "flex-start" }}>
+                  {addGroupLoading ? "Validating…" : "Validate & Add"}
+                </button>
+                {addGroupResult && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "0.625rem", padding: "0.75rem 1rem", borderRadius: "0.625rem", backgroundColor: addGroupResult.ok ? "#f0fdf4" : "#fef2f2", border: `1px solid ${addGroupResult.ok ? "#bbf7d0" : "#fecaca"}` }}>
+                    {addGroupResult.ok
+                      ? <CheckCircle2 size={16} color="#10b981" strokeWidth={2} style={{ flexShrink: 0, marginTop: "1px" }} />
+                      : <AlertCircle size={16} color="#ef4444" strokeWidth={2} style={{ flexShrink: 0, marginTop: "1px" }} />}
+                    <span style={{ fontSize: "0.8125rem", color: addGroupResult.ok ? "#166534" : "#991b1b", lineHeight: "1.5" }}>{addGroupResult.msg}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
-          {groups.length > 0 ? groups.map((g) => (
-            <div key={g.id} style={{ display: "grid", gridTemplateColumns: "2fr 2fr 90px 100px 80px", padding: "0.75rem 1.375rem", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
-                <div style={{ width: "30px", height: "30px", borderRadius: "50%", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Users size={14} color="#10b981" strokeWidth={2} />
-                </div>
-                <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
-              </div>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.url || "—"}</span>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>—</span>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", padding: "0.1875rem 0.5rem", borderRadius: "2rem", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", width: "fit-content" }}>
-                <div style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: "#10b981" }} />
-                <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: "#166534" }}>Active</span>
-              </div>
-              <button
-                onClick={async () => {
-                  await supabase.from("target_groups").delete().eq("id", g.id);
-                  setGroups(prev => prev.filter(x => x.id !== g.id));
-                }}
-                style={{ background: "none", border: "1px solid #fecaca", borderRadius: "0.375rem", padding: "0.25rem 0.5rem", color: "#ef4444", fontSize: "0.6875rem", fontWeight: 600, cursor: "pointer", width: "fit-content" }}
-              >Remove</button>
+
+          {/* ── Step 3: Groups table ── */}
+          <div style={{ ...card, overflow: "hidden" }}>
+            <div style={{ padding: "1.125rem 1.375rem", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <h3 style={h3}>Your Groups</h3>
+              <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: "var(--text-3)", backgroundColor: "var(--hover-bg)", padding: "0.1875rem 0.5rem", borderRadius: "2rem" }}>{groups.length} groups</span>
             </div>
-          )) : emptyState(<Users size={18} color="#c0c8cf" />, "No groups added", "Add your first Facebook group above to start targeting it.")}
-        </div>
-      </>
-    );
+            {groups.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 80px 130px 90px", padding: "0.5rem 1.375rem", borderBottom: "1px solid var(--border)" }}>
+                {["Group Name", "URL", "Privacy", "Status", "Actions"].map(h => <span key={h} style={label}>{h}</span>)}
+              </div>
+            )}
+            {groups.length > 0 ? groups.map(g => {
+              const badge = getStatusBadge(g);
+              return (
+                <div key={g.id} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 80px 130px 90px", padding: "0.75rem 1.375rem", borderBottom: "1px solid var(--border)", alignItems: "center", gap: "0.5rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", minWidth: 0 }}>
+                    <div style={{ width: "30px", height: "30px", borderRadius: "50%", backgroundColor: badge.bg, border: `1px solid ${badge.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Users size={14} color={badge.dot} strokeWidth={2} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
+                      {g.requires_approval && <span style={{ fontSize: "0.6875rem", color: "#f59e0b", fontWeight: 500 }}>Needs admin approval</span>}
+                    </div>
+                  </div>
+                  <a href={g.url || "#"} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.75rem", color: "#3b82f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" }}>{g.url ? "Open ↗" : "—"}</a>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-2)", textTransform: "capitalize" }}>{g.privacy || "—"}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", padding: "0.1875rem 0.5rem", borderRadius: "2rem", backgroundColor: badge.bg, border: `1px solid ${badge.border}`, width: "fit-content" }}>
+                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: badge.dot }} />
+                    <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: badge.text }}>{badge.label}</span>
+                  </div>
+                  <button onClick={async () => { await supabase.from("target_groups").update({ is_active: false }).eq("id", g.id); setGroups(prev => prev.filter(x => x.id !== g.id)); }} style={{ background: "none", border: "1px solid #fecaca", borderRadius: "0.375rem", padding: "0.25rem 0.5rem", color: "#ef4444", fontSize: "0.6875rem", fontWeight: 600, cursor: "pointer" }}>Remove</button>
+                </div>
+              );
+            }) : emptyState(<Users size={18} color="#c0c8cf" />, "No groups added", fbSessions.length === 0 ? 'Connect a Facebook account above first, then auto-fetch or add by URL.' : 'Click "Auto-fetch Groups" to import your joined groups, or add one by URL above.')}
+          </div>
+        </>
+      );
+    }
 
     // ── PAGES ─────────────────────────────────────────────────────────────────
     if (activeNav === "Pages") return (
