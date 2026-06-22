@@ -793,11 +793,10 @@ export default function DashboardPage() {
       </aside>
 
       {/* ─────────────────────── MAIN ─────────────────────── */}
-      <main className={`flex-1 flex flex-col ${!isMobile ? 'ml-0' : 'ml-0'} transition-all duration-300 max-w-full`} 
+      <main className={`flex-1 flex flex-col min-h-0 transition-all duration-300`} 
         style={{ 
-          marginLeft: !isMobile ? SW : undefined,
           width: !isMobile ? `calc(100% - ${SW})` : '100%',
-          maxWidth: !isMobile ? `calc(100vw - ${SW})` : '100vw'
+          minWidth: 0
         }}
       >
 
@@ -1038,10 +1037,8 @@ export default function DashboardPage() {
         )}
 
         {/* Page body */}
-        <div className="flex-1 p-4 sm:p-6 lg:p-7 xl:p-8 2xl:p-10 overflow-y-auto max-w-full">
-          <div className="w-full max-w-7xl mx-auto">
-            {renderContent()}
-          </div>
+        <div className="flex-1 p-4 sm:p-6 lg:p-7 xl:p-8 2xl:p-10 overflow-y-auto">
+          {renderContent()}
         </div>
       </main>
 
