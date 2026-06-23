@@ -36,6 +36,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
 from pydantic import BaseModel
 
@@ -87,6 +88,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if os.path.exists("/app/novnc_static"):
+    app.mount("/static/novnc", StaticFiles(directory="/app/novnc_static"), name="novnc_static")
 
 
 # ── Cleanup loop — kill stale sessions after timeout ─────────────────────────
