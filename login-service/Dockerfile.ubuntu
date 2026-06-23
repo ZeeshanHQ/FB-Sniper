@@ -1,7 +1,9 @@
-FROM python:3.11-slim
+FROM ubuntu:22.04
 
 # ── System deps: Xvfb + noVNC + Chromium + websockify ──────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3-pip \
     xvfb \
     x11vnc \
     novnc \
@@ -34,10 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Python deps ─────────────────────────────────────────────────────────────
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 # ── Install Playwright Chromium ──────────────────────────────────────────────
-RUN playwright install chromium
+RUN python3 -m playwright install chromium --with-deps
 
 # ── App source ──────────────────────────────────────────────────────────────
 COPY . .
@@ -47,4 +49,4 @@ RUN ln -sf /usr/share/novnc /app/novnc_static || true
 
 EXPOSE 8080 6080
 
-CMD ["python", "server.py"]
+CMD ["python3", "server.py"]

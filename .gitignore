@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 .DS_Store
 *.log
+*.key
+*.pem
+backend/ssh-key*
