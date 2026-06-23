@@ -170,8 +170,13 @@ async def start_login(req: StartLoginRequest):
     # noVNC URL — served by websockify on NOVNC_PORT
     # We proxy all vnc ports through a single websockify via token routing
     # Generate full HTTPS URL to avoid mixed content issues
-    scheme = "https"
-    novnc_url = f"{scheme}://{os.getenv('PUBLIC_HOST', 'localhost')}/novnc/?token={token}"
+    host = os.getenv('PUBLIC_HOST', 'localhost')
+    # Remove https:// prefix if it already exists
+    if host.startswith('https://'):
+        host = host[8:]
+    elif host.startswith('http://'):
+        host = host[7:]
+    novnc_url = f"https://{host}/novnc/?token={token}"
 
     logger.info(f"[StartLogin] user={req.user_id} token={token[:8]}… display=:{display_n}")
     return {
@@ -202,7 +207,12 @@ async def novnc_viewer(token: str):
         return HTMLResponse("<h2>Session expired or not found.</h2>", status_code=404)
 
     vnc_port = s["vnc_port"]
-    host     = os.getenv("PUBLIC_HOST", "localhost")
+    host = os.getenv("PUBLIC_HOST", "localhost")
+    # Remove https:// prefix if it already exists
+    if host.startswith('https://'):
+        host = host[8:]
+    elif host.startswith('http://'):
+        host = host[7:]
 
     html = f"""<!DOCTYPE html>
 <html>
