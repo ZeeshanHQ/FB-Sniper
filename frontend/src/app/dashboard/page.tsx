@@ -1678,8 +1678,6 @@ export default function DashboardPage() {
       };
 
       const loginServiceBase = process.env.NEXT_PUBLIC_LOGIN_SERVICE_URL || "";
-      // Debug: Log the URL to see if it's being read
-      console.log("Login service URL:", loginServiceBase);
 
       const handleConnectFB = async () => {
         if (!user?.id) return;
