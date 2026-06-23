@@ -1691,7 +1691,7 @@ export default function DashboardPage() {
             });
             const d = await r.json();
             if (d.success) {
-              setLoginModal({ token: d.token, novncUrl: `https://129.213.58.124/novnc/?token=${d.token}` });
+              setLoginModal({ token: d.token, novncUrl: `https://129.213.58.124/static/novnc/vnc.html?host=129.213.58.124&port=443&path=websockify&autoconnect=true&resize=scale&show_dot=false&token=${d.token}` });
               setLoginPollStatus("waiting");
               // Poll for completion
               const poll = setInterval(async () => {
