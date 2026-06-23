@@ -169,7 +169,9 @@ async def start_login(req: StartLoginRequest):
 
     # noVNC URL — served by websockify on NOVNC_PORT
     # We proxy all vnc ports through a single websockify via token routing
-    novnc_url = f"/novnc/?token={token}"
+    # Generate full HTTPS URL to avoid mixed content issues
+    scheme = "https"
+    novnc_url = f"{scheme}://{os.getenv('PUBLIC_HOST', 'localhost')}/novnc/?token={token}"
 
     logger.info(f"[StartLogin] user={req.user_id} token={token[:8]}… display=:{display_n}")
     return {
@@ -220,7 +222,7 @@ async def novnc_viewer(token: str):
     <span>🔒 Astraventa — Connect your Facebook Account</span>
     <span id="status">Log into Facebook in the window below. This tab will close automatically when done.</span>
   </div>
-  <iframe src="/static/novnc/vnc.html?host={host}&port={NOVNC_PORT}&path=websockify?token={token}&autoconnect=true&resize=scale&show_dot=false" allowfullscreen></iframe>
+  <iframe src="/static/novnc/vnc.html?host={host}&path=websockify?token={token}&autoconnect=true&resize=scale&show_dot=false" allowfullscreen></iframe>
   <script>
     // Poll for completion
     const poll = setInterval(async () => {{
