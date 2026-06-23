@@ -103,37 +103,137 @@ async def _sleep(a: float, b: float) -> None:
 
 
 async def _human_type(page: Page, selector_or_locator, text: str) -> None:
-    """Type text char-by-char with human-like jitter."""
+    """Type text with advanced human patterns: variable speed, typos/corrections, rhythm changes."""
     locator = (
         page.locator(selector_or_locator)
         if isinstance(selector_or_locator, str)
         else selector_or_locator
     )
+    
+    # Focus with slight delay
     await locator.click()
-    await _sleep(0.3, 0.9)
-    for ch in text:
+    await _sleep(0.4, 1.1)
+    
+    # Clear any existing text
+    await page.keyboard.press("Control+a")
+    await _sleep(0.1, 0.3)
+    
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        
+        # Simulate realistic typing bursts and pauses
+        if random.random() < 0.08:  # 8% chance of a thinking pause
+            await _sleep(0.8, 2.2)
+        elif random.random() < 0.15:  # 15% chance of short pause
+            await _sleep(0.3, 0.7)
+        
+        # Occasional typo and correction (5% chance on longer words)
+        if i > 5 and random.random() < 0.05 and ch.isalpha():
+            # Type wrong character
+            wrong = random.choice([c for c in "qwertyuiopasdfghjklzxcvbnm" if c != ch.lower()])
+            await page.keyboard.type(wrong)
+            await _sleep(0.1, 0.3)
+            # Backspace and correct
+            await page.keyboard.press("Backspace")
+            await _sleep(0.2, 0.5)
+        
+        # Type the correct character with variable speed
+        if random.random() < 0.3:  # 30% chance of faster typing
+            await _sleep(0.03, 0.08)
+        else:  # Normal typing speed
+            await _sleep(0.05, 0.15)
+            
         await page.keyboard.type(ch)
-        # occasional longer pauses, like a human thinking
-        if random.random() < 0.06:
-            await _sleep(0.25, 0.8)
-        else:
-            await _sleep(0.02, 0.12)
+        i += 1
 
 
 async def _human_mouse_wiggle(page: Page) -> None:
+    """Realistic mouse movements: curved paths, slight tremors, hover patterns."""
     try:
-        w = random.randint(200, 1100)
-        h = random.randint(150, 600)
-        await page.mouse.move(w, h, steps=random.randint(5, 20))
+        # Get current position
+        pos = await page.evaluate("({x: window.mouseX || 0, y: window.mouseY || 0})")
+        current_x, current_y = pos.get("x", 500), pos.get("y", 300)
+        
+        # Generate target with gaussian distribution around center
+        target_x = int(random.gauss(700, 200))
+        target_y = int(random.gauss(400, 150))
+        target_x = max(100, min(1200, target_x))
+        target_y = max(100, min(700, target_y))
+        
+        # Create curved path with intermediate points
+        steps = random.randint(8, 20)
+        for i in range(steps):
+            t = (i + 1) / steps
+            # Bezier curve for natural movement
+            mid_x = (current_x + target_x) / 2 + random.randint(-100, 100)
+            mid_y = (current_y + target_y) / 2 + random.randint(-80, 80)
+            
+            if t < 0.5:
+                x = current_x + (mid_x - current_x) * (t * 2)
+                y = current_y + (mid_y - current_y) * (t * 2)
+            else:
+                x = mid_x + (target_x - mid_x) * ((t - 0.5) * 2)
+                y = mid_y + (target_y - mid_y) * ((t - 0.5) * 2)
+            
+            # Add micro-tremor
+            x += random.randint(-3, 3)
+            y += random.randint(-3, 3)
+            
+            await page.mouse.move(x, y)
+            await _sleep(0.01, 0.04)
+            
     except Exception:
         pass
 
 
 async def _human_scroll(page: Page, times: int = 3) -> None:
-    for _ in range(times):
-        await page.mouse.wheel(0, random.randint(400, 900))
-        await _sleep(0.6, 1.6)
-        await _human_mouse_wiggle(page)
+    """Natural scrolling with variable speeds and pauses."""
+    for i in range(times):
+        # Variable scroll distances and speeds
+        if random.random() < 0.3:  # 30% chance of long scroll
+            distance = random.randint(600, 1200)
+            speed = random.randint(3, 8)
+        else:  # Normal scroll
+            distance = random.randint(200, 500)
+            speed = random.randint(5, 12)
+            
+        # Scroll in small increments for smoothness
+        steps = max(1, distance // 50)
+        for _ in range(steps):
+            await page.mouse.wheel(0, distance // steps)
+            await _sleep(0.02, 0.06)
+            
+        await _sleep(0.4, 1.2)
+        
+        # Occasional mouse movement during scroll
+        if random.random() < 0.4:
+            await _human_mouse_wiggle(page)
+
+
+async def _human_hover_around(page: Page, selector: str) -> None:
+    """Hover around an element before clicking, like a human scanning."""
+    try:
+        elem = page.locator(selector).first
+        box = await elem.bounding_box()
+        if not box:
+            return
+            
+        # Hover around the element (not directly on it)
+        hover_x = box["x"] + random.randint(-50, box["width"] + 50)
+        hover_y = box["y"] + random.randint(-30, box["height"] + 30)
+        
+        await page.mouse.move(hover_x, hover_y, steps=random.randint(5, 12))
+        await _sleep(0.3, 0.8)
+        
+        # Small movement toward element
+        await page.mouse.move(
+            box["x"] + box["width"] // 2,
+            box["y"] + box["height"] // 2,
+            steps=random.randint(3, 8)
+        )
+    except Exception:
+        pass
 
 
 # ── Context construction ─────────────────────────────────────────────────────
@@ -405,44 +505,79 @@ async def post_to_group(
             await _sleep(2.5, 4.5)
             await _human_scroll(page, times=1)
 
-            # Open composer
+            # Open composer with human-like interaction
             opened = False
             for sel in SELECTORS["group_composer_trigger"]:
                 loc = page.locator(sel).first
                 if await loc.count():
+                    # Hover around before clicking
+                    await _human_hover_around(page, sel)
+                    await _sleep(0.2, 0.6)
                     await loc.click()
                     opened = True
                     break
             if not opened:
                 return {"success": False, "error": "Composer not found (not a member or DOM changed)."}
 
-            await _sleep(1.0, 2.2)
+            await _sleep(1.2, 2.8)
+            
+            # Sometimes scroll a bit before typing (human behavior)
+            if random.random() < 0.3:
+                await _human_scroll(page, times=1)
+                await _sleep(0.5, 1.2)
+            
             textbox = page.locator(SELECTORS["composer_textbox"]).first
             await textbox.wait_for(state="visible", timeout=15000)
+            
+            # Click near textbox then focus properly
+            await _human_hover_around(page, SELECTORS["composer_textbox"])
+            await textbox.click()
+            await _sleep(0.3, 0.7)
+            
             await _human_type(page, textbox, content)
-            await _sleep(0.8, 1.8)
+            await _sleep(0.8, 2.1)
 
-            # Optional image
+            # Optional image with realistic upload behavior
             if image_path:
                 try:
+                    # Look for photo button with human scanning
+                    await _human_hover_around(page, SELECTORS["photo_input"])
                     file_input = page.locator(SELECTORS["photo_input"]).first
                     await file_input.set_input_files(image_path)
-                    await _sleep(2.5, 5.0)  # wait for upload/preview
+                    
+                    # Wait for upload with human-like impatience checks
+                    for _ in range(random.randint(3, 7)):
+                        await _sleep(0.5, 1.0)
+                        # Move mouse slightly while waiting
+                        await _human_mouse_wiggle(page)
+                        
                 except Exception as exc:
                     logger.warning("Image attach failed: %s", exc)
 
-            # Submit
+            # Final review before posting (human behavior)
+            if random.random() < 0.4:  # 40% chance to "review" before posting
+                await _sleep(1.5, 3.0)
+                await _human_mouse_wiggle(page)
+            
+            # Submit with hover behavior
             posted = False
             for sel in SELECTORS["post_button"]:
                 btn = page.locator(sel).first
                 if await btn.count():
+                    await _human_hover_around(page, sel)
+                    await _sleep(0.3, 0.8)
                     await btn.click()
                     posted = True
                     break
             if not posted:
                 return {"success": False, "error": "Post button not found."}
 
-            await _sleep(3.0, 6.0)
+            # Wait for post to process with realistic behavior
+            await _sleep(3.0, 7.0)
+            
+            # Occasional scroll after posting (human behavior)
+            if random.random() < 0.3:
+                await _human_scroll(page, times=1)
 
             pending = bool(await page.locator(SELECTORS["pending_approval_marker"]).count())
             return {"success": True, "pending_approval": pending, "error": None}
