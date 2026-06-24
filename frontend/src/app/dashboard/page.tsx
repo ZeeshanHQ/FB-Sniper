@@ -1691,7 +1691,7 @@ export default function DashboardPage() {
             });
             const d = await r.json();
             if (d.success) {
-              setLoginModal({ token: d.token, novncUrl: `https://api-login.astraventa.com/static/novnc/vnc.html?host=api-login.astraventa.com&port=443&path=websockify&autoconnect=true&resize=scale&show_dot=false&token=${d.token}` });
+              setLoginModal({ token: d.token, novncUrl: `https://api-login.astraventa.com/static/novnc/vnc.html?host=api-login.astraventa.com&port=443&path=websockify%3Ftoken%3D${d.token}&autoconnect=true&resize=scale&show_dot=false` });
               setLoginPollStatus("waiting");
               // Poll for completion
               const poll = setInterval(async () => {
