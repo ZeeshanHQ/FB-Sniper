@@ -1677,7 +1677,7 @@ export default function DashboardPage() {
         } catch {} finally { setSessionsLoading(false); }
       };
 
-      const loginServiceBase = process.env.NEXT_PUBLIC_LOGIN_SERVICE_URL || "";
+      const loginServiceBase = "https://api-login.astraventa.com";
 
       const handleConnectFB = async () => {
         if (!user?.id) return;
