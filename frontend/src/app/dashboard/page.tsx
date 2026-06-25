@@ -1677,45 +1677,41 @@ export default function DashboardPage() {
         } catch {} finally { setSessionsLoading(false); }
       };
 
-      const loginServiceBase = "https://api-login.astraventa.com";
-
       const handleConnectFB = async () => {
         if (!user?.id) return;
-        // If login service is configured, use live noVNC iframe modal
-        if (loginServiceBase) {
-          setConnectingSession(true); setSessionConnectError(null);
-          try {
-            const r = await fetch(`${loginServiceBase}/start-login`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ user_id: user.id }),
-            });
-            const d = await r.json();
-            if (d.success) {
-              setLoginModal({ token: d.token, novncUrl: `https://api-login.astraventa.com/static/novnc/vnc.html?host=api-login.astraventa.com&port=443&path=websockify%3Ftoken%3D${d.token}&autoconnect=true&resize=scale&show_dot=false` });
-              setLoginPollStatus("waiting");
-              // Poll for completion
-              const poll = setInterval(async () => {
-                try {
-                  const sr = await fetch(`${loginServiceBase}/login-status/${d.token}`);
-                  const sd = await sr.json();
-                  if (sd.status === "done") {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper-api.onrender.com";
+        setConnectingSession(true); setSessionConnectError(null);
+        try {
+          const r = await fetch(`${apiBase}/api/fb/session/start-browserless`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: user.id }),
+          });
+          const d = await r.json();
+          if (d.success) {
+            setLoginModal({ token: d.tracking_id, novncUrl: d.debugger_url });
+            setLoginPollStatus("waiting");
+            // Poll for completion by checking if a new session was added to DB
+            const poll = setInterval(async () => {
+              try {
+                const sr = await fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`);
+                const sd = await sr.json();
+                if (sd.success && sd.sessions && sd.sessions.length > 0) {
+                  // We just check if the most recent session is very new (last 1 minute)
+                  const mostRecent = sd.sessions[0];
+                  if (Date.now() - new Date(mostRecent.created_at).getTime() < 60000) {
                     clearInterval(poll);
                     setLoginPollStatus("done");
                     setTimeout(() => { setLoginModal(null); setLoginPollStatus(null); loadSessions(); }, 2500);
-                  } else if (sd.status === "expired" || sd.status === "error") {
-                    clearInterval(poll);
-                    setLoginPollStatus("error");
                   }
-                } catch {}
-              }, 3000);
-            } else { setSessionConnectError(d.detail || "Failed to start login service."); }
-          } catch (e: any) { setSessionConnectError("Login service unreachable. See instructions below."); setShowConnectInstructions(true); }
-          finally { setConnectingSession(false); }
-        } else {
-          // Fallback: show manual script instructions
-          setShowConnectInstructions(v => !v);
-          setSessionConnectError(null);
-        }
+                }
+              } catch {}
+            }, 5000);
+            
+            // Auto timeout after 10 minutes
+            setTimeout(() => clearInterval(poll), 600000);
+          } else { setSessionConnectError(d.detail || "Failed to start login service."); }
+        } catch (e: any) { setSessionConnectError("Login service unreachable. See instructions below."); setShowConnectInstructions(true); }
+        finally { setConnectingSession(false); }
       };
 
       const handleCopyUserId = () => {
