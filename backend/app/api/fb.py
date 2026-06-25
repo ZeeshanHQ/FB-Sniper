@@ -231,7 +231,7 @@ async def start_browserless(req: StartSessionRequest, background_tasks: Backgrou
         await page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
     except Exception as e:
         logger.error(f"Failed to start CDP session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to initialize browser session.")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize browser session: {str(e)}")
 
     background_tasks.add_task(_browserless_capture_bg_running, pw, browser, context, page, req.user_id, tracking_id, req.proxy)
     
