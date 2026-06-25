@@ -221,13 +221,13 @@ async def start_browserless(req: StartSessionRequest, background_tasks: Backgrou
         from playwright.async_api import async_playwright
         pw = await async_playwright().start()
         browser = await pw.chromium.connect_over_cdp(ws_url)
-        context = browser.contexts[0] if browser.contexts else await browser.new_context(
+        context = await browser.new_context(
             user_agent=fb_browser.DEFAULT_USER_AGENT,
             viewport={"width": 1366, "height": 768},
             locale="en-US",
             timezone_id="America/New_York",
         )
-        page = context.pages[0] if context.pages else await context.new_page()
+        page = await context.new_page()
         await context.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
         await page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
     except Exception as e:
