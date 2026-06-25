@@ -235,7 +235,10 @@ async def start_browserless(req: StartSessionRequest, background_tasks: Backgrou
 
     background_tasks.add_task(_browserless_capture_bg_running, pw, browser, context, page, req.user_id, tracking_id, req.proxy)
     
-    debugger_url = f"https://{host}/vnc/?token=astraventa_sniper_2026&trackingId={tracking_id}"
+    # Since Browserless V1 has a pure devtools UI but no separate clean VNC viewer without the developer tab,
+    # we point to the built-in debugger index.html with the right tracking ID.
+    # We will use the V1 specific debugger UI path
+    debugger_url = f"https://{host}/devtools/inspector.html?ws={host}/devtools/page/{tracking_id}"
     return {
         "success": True,
         "tracking_id": tracking_id,
