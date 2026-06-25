@@ -227,7 +227,7 @@ async def start_browserless(req: StartSessionRequest, background_tasks: Backgrou
     tracking_id = secrets.token_hex(16)
     background_tasks.add_task(_browserless_capture_bg, req.user_id, tracking_id, req.proxy)
     host = os.getenv("PUBLIC_HOST", "api-login.astraventa.com")
-    debugger_url = f"https://{host}/vnc/?trackingId={tracking_id}"
+    debugger_url = f"https://{host}/vnc/?token=astraventa_sniper_2026&trackingId={tracking_id}"
     return {
         "success": True,
         "tracking_id": tracking_id,
