@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import asyncio
+import httpx
 import secrets
 from playwright.async_api import async_playwright
 
@@ -235,10 +236,28 @@ async def start_browserless(req: StartSessionRequest, background_tasks: Backgrou
 
     background_tasks.add_task(_browserless_capture_bg_running, pw, browser, context, page, req.user_id, tracking_id, req.proxy)
     
-    # Since Browserless V1 has a pure devtools UI but no separate clean VNC viewer without the developer tab,
-    # we point to the built-in debugger index.html with the right tracking ID.
-    # We will use the V1 specific debugger UI path
-    debugger_url = f"https://{host}/?token=astraventa_sniper_2026&trackingId={tracking_id}"
+    # Query Browserless /sessions to find the page ID for this tracking_id
+    # so we can build a live viewer URL instead of the raw debugger code editor.
+    page_id = None
+    try:
+        await asyncio.sleep(1)  # give Browserless a moment to register the session
+        async with httpx.AsyncClient(verify=False) as client:
+            resp = await client.get(f"https://{host}/sessions", timeout=5)
+            if resp.status_code == 200:
+                sessions = resp.json()
+                for s in sessions:
+                    if s.get("trackingId") == tracking_id:
+                        page_id = s.get("id")
+                        break
+    except Exception as e:
+        logger.warning(f"Could not query /sessions for page ID: {e}")
+
+    if page_id:
+        debugger_url = f"https://{host}/live?pageId={page_id}"
+    else:
+        # Fallback: use DevTools inspector directly
+        debugger_url = f"https://{host}/?token=astraventa_sniper_2026&trackingId={tracking_id}"
+    
     return {
         "success": True,
         "tracking_id": tracking_id,
