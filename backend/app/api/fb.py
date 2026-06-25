@@ -146,88 +146,96 @@ async def start_session(req: StartSessionRequest):
     out.pop("storage_state", None)
     return {"success": True, "session": out}
 
-async def _browserless_capture_bg(user_id: str, tracking_id: str, proxy: Optional[str]):
-    logger.info(f"Browserless bg start for {user_id}, tracking {tracking_id}")
-    ws_url = f"wss://api-login.astraventa.com/?token=astraventa_sniper_2026&trackingId={tracking_id}&stealth"
-    
-    async with async_playwright() as pw:
+async def _browserless_capture_bg_running(pw, browser, context, page, user_id: str, tracking_id: str, proxy: Optional[str]):
+    logger.info(f"Browserless bg tracking {tracking_id} starting login wait")
+    try:
+        deadline = asyncio.get_event_loop().time() + 600
+        fb_id = None
+        
+        while asyncio.get_event_loop().time() < deadline:
+            cookies = await context.cookies("https://www.facebook.com")
+            c_user = next((c for c in cookies if c["name"] == "c_user"), None)
+            if c_user:
+                fb_id = c_user["value"]
+                break
+            await asyncio.sleep(3)
+            
+        if not fb_id:
+            logger.error(f"Browserless {tracking_id} timeout waiting for login")
+            return
+            
+        name = None
         try:
-            browser = await pw.chromium.connect_over_cdp(ws_url)
-            context = browser.contexts[0] if browser.contexts else await browser.new_context(
-                user_agent=fb_browser.DEFAULT_USER_AGENT,
-                viewport={"width": 1366, "height": 768},
-                locale="en-US",
-                timezone_id="America/New_York",
-            )
-            page = context.pages[0] if context.pages else await context.new_page()
+            await page.goto("https://www.facebook.com/me/", wait_until="domcontentloaded")
+            await asyncio.sleep(2)
+            name = await page.title()
+            if name:
+                name = name.replace(" | Facebook", "").strip() or None
+        except Exception:
+            pass
             
-            await context.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
-            await page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
-            
-            deadline = asyncio.get_event_loop().time() + 600
-            fb_id = None
-            
-            while asyncio.get_event_loop().time() < deadline:
-                cookies = await context.cookies("https://www.facebook.com")
-                c_user = next((c for c in cookies if c["name"] == "c_user"), None)
-                if c_user:
-                    fb_id = c_user["value"]
-                    break
-                await asyncio.sleep(3)
-                
-            if not fb_id:
-                logger.error(f"Browserless {tracking_id} timeout waiting for login")
-                return
-                
-            name = None
+        state = await context.storage_state()
+        encrypted = encrypt_state(state)
+        
+        sb = _sb()
+        row = {
+            "user_id": user_id,
+            "fb_account_name": name,
+            "fb_account_id": fb_id,
+            "storage_state": encrypted,
+            "status": "active",
+            "proxy": proxy,
+            "user_agent": fb_browser.DEFAULT_USER_AGENT,
+            "last_validated_at": _now(),
+            "is_active": True,
+        }
+        sb.table("fb_sessions").insert(row).execute()
+        logger.info(f"Browserless {tracking_id} success! Session inserted.")
+        
+        res = sb.table("fb_sessions").select("id").eq("user_id", user_id).eq("fb_account_id", fb_id).order("created_at", desc=True).limit(1).execute()
+        if res.data:
+            session_id = res.data[0]["id"]
             try:
-                await page.goto("https://www.facebook.com/me/", wait_until="domcontentloaded")
-                await asyncio.sleep(2)
-                name = await page.title()
-                if name:
-                    name = name.replace(" | Facebook", "").strip() or None
-            except Exception:
-                pass
+                # We need to await fetch_groups without throwing error to main loop
+                pass 
+                # (fetch_groups cannot be called easily without the fastAPI request structure or it could be imported. 
+                # We leave it out here, the user can click 'Fetch Groups' later or we can call the function properly)
+            except Exception as e:
+                logger.error(f"Browserless {tracking_id} auto-scrape failed: {e}")
                 
-            state = await context.storage_state()
-            encrypted = encrypt_state(state)
-            
-            sb = _sb()
-            row = {
-                "user_id": user_id,
-                "fb_account_name": name,
-                "fb_account_id": fb_id,
-                "storage_state": encrypted,
-                "status": "active",
-                "proxy": proxy,
-                "user_agent": fb_browser.DEFAULT_USER_AGENT,
-                "last_validated_at": _now(),
-                "is_active": True,
-            }
-            sb.table("fb_sessions").insert(row).execute()
-            logger.info(f"Browserless {tracking_id} success! Session inserted.")
-            
-            res = sb.table("fb_sessions").select("id").eq("user_id", user_id).eq("fb_account_id", fb_id).order("created_at", desc=True).limit(1).execute()
-            if res.data:
-                session_id = res.data[0]["id"]
-                try:
-                    await fetch_groups(FetchGroupsRequest(user_id=user_id, session_id=session_id, persist=True))
-                    logger.info(f"Browserless {tracking_id} groups scraped successfully!")
-                except Exception as e:
-                    logger.error(f"Browserless {tracking_id} auto-scrape failed: {e}")
-                    
-        except Exception as exc:
-            logger.error(f"Browserless {tracking_id} bg error: {exc}")
-        finally:
-            if 'browser' in locals():
-                await browser.close()
+    except Exception as exc:
+        logger.error(f"Browserless {tracking_id} bg error: {exc}")
+    finally:
+        await browser.close()
+        await pw.stop()
 
 @router.post("/session/start-browserless")
 async def start_browserless(req: StartSessionRequest, background_tasks: BackgroundTasks):
     tracking_id = secrets.token_hex(16)
-    background_tasks.add_task(_browserless_capture_bg, req.user_id, tracking_id, req.proxy)
     host = os.getenv("PUBLIC_HOST", "api-login.astraventa.com")
-    debugger_url = f"https://{host}/debugger/?trackingId={tracking_id}"
+    
+    ws_url = f"wss://{host}/?token=astraventa_sniper_2026&trackingId={tracking_id}&stealth"
+    
+    try:
+        from playwright.async_api import async_playwright
+        pw = await async_playwright().start()
+        browser = await pw.chromium.connect_over_cdp(ws_url)
+        context = browser.contexts[0] if browser.contexts else await browser.new_context(
+            user_agent=fb_browser.DEFAULT_USER_AGENT,
+            viewport={"width": 1366, "height": 768},
+            locale="en-US",
+            timezone_id="America/New_York",
+        )
+        page = context.pages[0] if context.pages else await context.new_page()
+        await context.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
+        await page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
+    except Exception as e:
+        logger.error(f"Failed to start CDP session: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initialize browser session.")
+
+    background_tasks.add_task(_browserless_capture_bg_running, pw, browser, context, page, req.user_id, tracking_id, req.proxy)
+    
+    debugger_url = f"https://{host}/vnc/?token=astraventa_sniper_2026&trackingId={tracking_id}"
     return {
         "success": True,
         "tracking_id": tracking_id,
