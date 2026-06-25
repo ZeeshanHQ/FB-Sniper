@@ -1816,8 +1816,46 @@ export default function DashboardPage() {
                 <h3 style={h3}>Connected Facebook Accounts</h3>
                 <span style={{ fontSize: "0.6875rem", fontWeight: 600, color: "var(--text-3)", backgroundColor: "var(--hover-bg)", padding: "0.1875rem 0.5rem", borderRadius: "2rem" }}>{fbSessions.length} account{fbSessions.length !== 1 ? "s" : ""}</span>
               </div>
-              <button onClick={handleConnectFB} style={{ display: "flex", alignItems: "center", gap: "0.375rem", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: showConnectInstructions ? "#1d1d1d" : "var(--surface)", color: showConnectInstructions ? "#fff" : "var(--text-1)", fontSize: "0.8125rem", fontWeight: 600, cursor: "pointer" }}>
-                {showConnectInstructions ? "Hide Instructions" : "Connect Account"}
+              <button 
+                onClick={handleConnectFB} 
+                disabled={connectingSession}
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: "0.5rem", 
+                  padding: "0.5rem 1rem", 
+                  borderRadius: "0.5rem", 
+                  border: "1px solid var(--border)", 
+                  backgroundColor: showConnectInstructions ? "#1d1d1d" : "var(--surface)", 
+                  color: showConnectInstructions ? "#fff" : "var(--text-1)", 
+                  fontSize: "0.8125rem", 
+                  fontWeight: 600, 
+                  cursor: connectingSession ? "not-allowed" : "pointer",
+                  opacity: connectingSession ? 0.7 : 1
+                }}
+              >
+                {connectingSession && (
+                  <>
+                    <style>{`
+                      @keyframes connect-spin {
+                        to { transform: rotate(360deg); }
+                      }
+                    `}</style>
+                    <svg 
+                      style={{ 
+                        animation: "connect-spin 0.8s linear infinite", 
+                        width: "14px", 
+                        height: "14px", 
+                        border: "2px solid rgba(255,255,255,0.2)", 
+                        borderTopColor: "currentColor", 
+                        borderRadius: "50%",
+                        display: "inline-block"
+                      }} 
+                      viewBox="0 0 24 24" 
+                    />
+                  </>
+                )}
+                {connectingSession ? "Connecting..." : (showConnectInstructions ? "Hide Instructions" : "Connect Account")}
               </button>
             </div>
             {/* Local script instructions panel */}
