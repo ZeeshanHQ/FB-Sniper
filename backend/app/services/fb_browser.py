@@ -726,13 +726,16 @@ async def post_to_group(
             textbox = None
             dialog_textbox_selector = 'div[role="dialog"] div[role="textbox"][contenteditable="true"]'
             loc = page.locator(dialog_textbox_selector)
-            if not await loc.count():
-                loc = page.locator(SELECTORS["composer_textbox"])
-
+            
+            # Wait specifically for the dialog textbox to be attached/visible first, if dialog is present
             try:
-                await loc.first.wait_for(state="attached", timeout=15000)
+                await loc.first.wait_for(state="attached", timeout=10000)
             except Exception:
-                return {"success": False, "error": "Composer textbox not found."}
+                loc = page.locator(SELECTORS["composer_textbox"])
+                try:
+                    await loc.first.wait_for(state="attached", timeout=10000)
+                except Exception:
+                    return {"success": False, "error": "Composer textbox not found."}
             
             count = await loc.count()
             for i in range(count):
@@ -757,9 +760,9 @@ async def post_to_group(
             if not textbox:
                 return {"success": False, "error": "Composer textbox is not visible."}
             
-            # Click near textbox then focus properly
+            # Click near textbox then focus properly using JS evaluate to bypass pointer event interception
             await _human_hover_around(page, textbox)
-            await textbox.click()
+            await textbox.evaluate("el => { el.focus(); el.click(); }")
             await _sleep(0.3, 0.7)
             
             await _human_type(page, textbox, content)
