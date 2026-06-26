@@ -494,12 +494,15 @@ async def fetch_joined_groups(
                         if (match) {
                             const gid = match[1];
                             if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
-                                const text = (el.innerText || el.textContent || '').trim();
-                                const cleanName = text.split('\\n')[0].trim();
-                                if (cleanName && cleanName.length > 1 && !managedGroups[gid]) {
+                                const firstSpan = el.querySelector('span');
+                                let nameText = firstSpan ? (firstSpan.innerText || firstSpan.textContent || '').trim() : (el.innerText || el.textContent || '').trim().split('\\n')[0].trim();
+                                // Clean up trailing activity indicators
+                                nameText = nameText.replace(/(?:last active|active|about|hour|hours|minute|minutes|just now|yesterday|días|horas|minutos|activa).*/i, '').trim();
+                                
+                                if (nameText && nameText.length > 1 && !managedGroups[gid]) {
                                     managedGroups[gid] = {
                                         id: gid,
-                                        name: cleanName.substring(0, 120),
+                                        name: nameText.substring(0, 120),
                                         url: "https://www.facebook.com/groups/" + gid + "/"
                                     };
                                 }
@@ -603,41 +606,38 @@ async def post_to_group(
         try:
             await page.goto(group_url, wait_until="domcontentloaded")
             await _sleep(2.5, 4.5)
-            await _human_scroll(page, times=1)
 
-            # Open composer with human-like interaction
+            # Open composer with human-like interaction (using combined selector to wait efficiently)
+            combined_trigger = ', '.join(SELECTORS["group_composer_trigger"])
+            try:
+                await page.locator(combined_trigger).first.wait_for(state="attached", timeout=15000)
+            except Exception:
+                return {"success": False, "error": "Composer not found (not a member or DOM changed)."}
+
+            loc = page.locator(combined_trigger)
+            count = await loc.count()
             opened = False
-            for sel in SELECTORS["group_composer_trigger"]:
-                loc = page.locator(sel)
-                try:
-                    await loc.first.wait_for(state="attached", timeout=5000)
-                except Exception:
-                    continue
-                
-                count = await loc.count()
-                for i in range(count):
-                    el = loc.nth(i)
-                    if await el.is_visible():
-                        await _human_hover_around(page, el)
-                        await _sleep(0.2, 0.6)
-                        await el.click()
-                        opened = True
-                        break
-                if opened:
+            for i in range(count):
+                el = loc.nth(i)
+                if await el.is_visible():
+                    await _human_hover_around(page, el)
+                    await _sleep(0.2, 0.6)
+                    await el.click()
+                    opened = True
                     break
+
             if not opened:
                 return {"success": False, "error": "Composer not found (not a member or DOM changed)."}
 
             await _sleep(1.2, 2.8)
             
-            # Sometimes scroll a bit before typing (human behavior)
-            if random.random() < 0.3:
-                await _human_scroll(page, times=1)
-                await _sleep(0.5, 1.2)
-            
-            # Find the visible composer textbox
+            # Find the visible composer textbox inside the modal dialog
             textbox = None
-            loc = page.locator(SELECTORS["composer_textbox"])
+            dialog_textbox_selector = 'div[role="dialog"] div[role="textbox"][contenteditable="true"]'
+            loc = page.locator(dialog_textbox_selector)
+            if not await loc.count():
+                loc = page.locator(SELECTORS["composer_textbox"])
+
             try:
                 await loc.first.wait_for(state="attached", timeout=15000)
             except Exception:
@@ -647,9 +647,22 @@ async def post_to_group(
             for i in range(count):
                 el = loc.nth(i)
                 if await el.is_visible():
+                    # Avoid matching comment boxes
+                    placeholder = await el.get_attribute("aria-placeholder") or ""
+                    label = await el.get_attribute("aria-label") or ""
+                    if "comment" in placeholder.lower() or "comment" in label.lower():
+                        continue
                     textbox = el
                     break
             
+            # Fallback to first visible textbox if no exact match found
+            if not textbox:
+                for i in range(count):
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        textbox = el
+                        break
+
             if not textbox:
                 return {"success": False, "error": "Composer textbox is not visible."}
             
@@ -664,9 +677,12 @@ async def post_to_group(
             # Optional image with realistic upload behavior
             if image_path:
                 try:
-                    # Look for photo button with human scanning
-                    await _human_hover_around(page, SELECTORS["photo_input"])
-                    file_input = page.locator(SELECTORS["photo_input"]).first
+                    # Look for photo button inside dialog first
+                    photo_loc = page.locator(f'div[role="dialog"] {SELECTORS["photo_input"]}')
+                    if not await photo_loc.count():
+                        photo_loc = page.locator(SELECTORS["photo_input"])
+                    await _human_hover_around(page, photo_loc)
+                    file_input = photo_loc.first
                     await file_input.set_input_files(image_path)
                     
                     # Wait for upload with human-like impatience checks
@@ -683,26 +699,51 @@ async def post_to_group(
                 await _sleep(1.5, 3.0)
                 await _human_mouse_wiggle(page)
             
-            # Submit with hover behavior
+            # Submit Post button (robust exact-text dialog check first)
             posted = False
-            for sel in SELECTORS["post_button"]:
-                loc = page.locator(sel)
-                try:
-                    await loc.first.wait_for(state="attached", timeout=5000)
-                except Exception:
-                    continue
+            btn_loc = page.locator('div[role="dialog"] div[role="button"]')
+            if not await btn_loc.count():
+                btn_loc = page.locator('div[role="button"]')
                 
-                count = await loc.count()
-                for i in range(count):
-                    el = loc.nth(i)
-                    if await el.is_visible():
+            count = await btn_loc.count()
+            for i in range(count):
+                el = btn_loc.nth(i)
+                if await el.is_visible():
+                    text = (await el.inner_text() or "").strip().lower()
+                    if text in ["post", "publicar", "posten", "publier", "share", "partager", "pubblica"]:
                         await _human_hover_around(page, el)
                         await _sleep(0.3, 0.8)
                         await el.click()
                         posted = True
                         break
-                if posted:
-                    break
+            
+            # Fallback to selectors if exact text search didn't resolve
+            if not posted:
+                for sel in SELECTORS["post_button"]:
+                    loc = page.locator(f'div[role="dialog"] {sel}')
+                    if not await loc.count():
+                        loc = page.locator(sel)
+                    try:
+                        await loc.first.wait_for(state="attached", timeout=5000)
+                    except Exception:
+                        continue
+                    
+                    count = await loc.count()
+                    for i in range(count):
+                        el = loc.nth(i)
+                        if await el.is_visible():
+                            # Guard against "Anonymous post" button
+                            label = (await el.get_attribute("aria-label") or "").lower()
+                            if "anonymous" in label:
+                                continue
+                            await _human_hover_around(page, el)
+                            await _sleep(0.3, 0.8)
+                            await el.click()
+                            posted = True
+                            break
+                    if posted:
+                        break
+
             if not posted:
                 return {"success": False, "error": "Post button not found."}
 
