@@ -116,6 +116,29 @@ def _session_cfg(row: dict) -> fb_browser.SessionConfig:
     )
 
 
+def _upsert_session(sb, row: dict) -> dict:
+    user_id = row["user_id"]
+    fb_account_id = row.get("fb_account_id")
+    if fb_account_id:
+        res = (
+            sb.table("fb_sessions")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("fb_account_id", fb_account_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            existing_id = res.data[0]["id"]
+            # If the session already exists, update it to keep the session ID stable!
+            updated = sb.table("fb_sessions").update(row).eq("id", existing_id).execute()
+            return updated.data[0]
+    
+    # Otherwise, insert a new session
+    inserted = sb.table("fb_sessions").insert(row).execute()
+    return inserted.data[0]
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/session/start")
@@ -142,8 +165,7 @@ async def start_session(req: StartSessionRequest):
         "last_validated_at": _now(),
         "is_active": True,
     }
-    inserted = sb.table("fb_sessions").insert(row).execute()
-    out = inserted.data[0]
+    out = _upsert_session(sb, row)
     out.pop("storage_state", None)
     return {"success": True, "session": out}
 
@@ -190,8 +212,8 @@ async def _browserless_capture_bg_running(pw, browser, context, page, user_id: s
             "last_validated_at": _now(),
             "is_active": True,
         }
-        sb.table("fb_sessions").insert(row).execute()
-        logger.info(f"Browserless {tracking_id} success! Session inserted.")
+        _upsert_session(sb, row)
+        logger.info(f"Browserless {tracking_id} success! Session upserted.")
         
         res = sb.table("fb_sessions").select("id").eq("user_id", user_id).eq("fb_account_id", fb_id).order("created_at", desc=True).limit(1).execute()
         if res.data:
@@ -285,8 +307,7 @@ async def store_session(req: StoreSessionRequest):
         "last_validated_at": _now(),
         "is_active": True,
     }
-    inserted = sb.table("fb_sessions").insert(row).execute()
-    out = inserted.data[0]
+    out = _upsert_session(sb, row)
     out.pop("storage_state", None)
     return {"success": True, "session": out}
 
