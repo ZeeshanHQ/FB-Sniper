@@ -396,17 +396,19 @@ async def fetch_joined_groups(
     max_scroll: int = 8,
     headless: bool = True,
 ) -> Dict[str, Any]:
-    """Scrape 'Groups you manage' from groups home sidebar."""
+    """Scrape 'Groups you manage' from groups home sidebar and fallback/merge with all joined groups."""
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
         page = await context.new_page()
         await _apply_stealth(page)
+        
+        managed_list = []
         try:
             # 1. Navigating to the main Groups page
             logger.info("[fb_browser] Navigating to https://www.facebook.com/groups/ to look for managed groups...")
             await page.goto("https://www.facebook.com/groups/", wait_until="domcontentloaded")
-            await _sleep(3.0, 5.0)
+            await _sleep(2.0, 3.5)
 
             # Scroll all scrollable navigation/sidebar elements to trigger React lazy-loading
             try:
@@ -420,11 +422,11 @@ async def fetch_joined_groups(
                     }
                 }
                 """)
-                await _sleep(1.5, 3.0)
+                await _sleep(1.0, 2.0)
             except Exception as e:
                 logger.warning(f"[fb_browser] Error scrolling sidebar: {e}")
 
-            managed_groups = await page.evaluate("""
+            managed_list = await page.evaluate("""
             () => {
                 // Normalizes text to lowercase and replaces curly quotes with standard ones
                 const norm = (str) => (str || '').trim().toLowerCase().replace(/[\\u2018\\u2019’']/g, "'");
@@ -515,14 +517,67 @@ async def fetch_joined_groups(
                 return Object.values(managedGroups);
             }
             """)
-
-            logger.info(f"[fb_browser] Scraped {len(managed_groups)} managed groups via groups home sidebar.")
-            return {"success": True, "groups": managed_groups}
+            logger.info(f"[fb_browser] Scraped {len(managed_list)} managed groups via groups home sidebar.")
         except Exception as exc:
-            logger.error(f"[fb_browser] Error scraping managed groups: {exc}")
-            return {"success": False, "error": str(exc), "groups": []}
-        finally:
-            await context.close()
+            logger.warning(f"[fb_browser] Managed groups sidebar scraper failed: {exc}")
+
+        joined_list = []
+        try:
+            # 2. Scrape all joined groups as fallback/addition
+            logger.info("[fb_browser] Navigating to https://www.facebook.com/groups/joins/ to look for joined groups...")
+            await page.goto("https://www.facebook.com/groups/joins/", wait_until="domcontentloaded")
+            await _sleep(2.0, 3.5)
+            
+            # Scroll to load all joined groups
+            scroll_count = min(int(max_scroll), 6) # cap scroll to avoid timeout
+            for _ in range(scroll_count):
+                await _human_scroll(page, times=1)
+                await _sleep(0.6, 1.3)
+
+            joined_list = await page.evaluate("""
+            () => {
+                const joinedGroups = {};
+                const anchors = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
+                for (const a of anchors) {
+                    const href = a.getAttribute('href') || a.href || '';
+                    const match = href.match(/\/groups\/([^/?#]+)/);
+                    if (match) {
+                        const gid = match[1];
+                        if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
+                            let nameText = (a.innerText || a.textContent || '').trim();
+                            nameText = nameText.replace(/\\s+/g, ' ');
+                            nameText = nameText.split('\\n')[0].trim();
+                            nameText = nameText.replace(/(?:last active|active|about|hour|hours|minute|minutes|just now|yesterday|días|horas|minutos|activa).*/i, '').trim();
+                            
+                            if (nameText && nameText.length > 1 && !joinedGroups[gid]) {
+                                joinedGroups[gid] = {
+                                    id: gid,
+                                    name: nameText.substring(0, 120),
+                                    url: "https://www.facebook.com/groups/" + gid + "/"
+                                };
+                            }
+                        }
+                    }
+                }
+                return Object.values(joinedGroups);
+            }
+            """)
+            logger.info(f"[fb_browser] Scraped {len(joined_list)} joined groups via /groups/joins/ page.")
+        except Exception as exc:
+            logger.warning(f"[fb_browser] Joined groups page scraper failed: {exc}")
+
+        # Combine results: prioritize managed groups first, then add unique joined groups
+        combined = {}
+        for g in managed_list:
+            combined[g["id"]] = g
+        for g in joined_list:
+            if g["id"] not in combined:
+                combined[g["id"]] = g
+
+        final_results = list(combined.values())
+        logger.info(f"[fb_browser] Combined scraper returned {len(final_results)} total unique groups.")
+        return {"success": True, "groups": final_results}
+
 
 
 async def validate_group(
