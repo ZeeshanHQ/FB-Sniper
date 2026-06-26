@@ -29,6 +29,7 @@ import asyncio
 import os
 import logging
 import random
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -296,7 +297,7 @@ async def _new_context(
 
     if ws_url:
         token = os.getenv("BROWSERLESS_TOKEN", "astraventa_sniper_2026")
-        connect_url = f"{ws_url}?token={token}&stealth"
+        connect_url = f"{ws_url}?token={token}&stealth&--user-agent={urllib.parse.quote(cfg.user_agent)}"
         if proxy_details:
             connect_url += f"&--proxy-server={proxy_details['server']}"
             if proxy_details.get("username") and proxy_details.get("password"):
@@ -348,6 +349,12 @@ async def _new_context(
     await context.add_init_script(
         "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
     )
+    # Spoof navigator.userAgent in JS
+    await context.add_init_script(f"""
+        Object.defineProperty(navigator, 'userAgent', {{
+            get: () => {repr(cfg.user_agent)}
+        }});
+    """)
     return context
 
 
@@ -357,6 +364,37 @@ async def _apply_stealth(page: Page) -> None:
             await stealth_async(page)
         except Exception as exc:  # pragma: no cover
             logger.warning("stealth_async failed: %s", exc)
+
+
+async def _new_page(context: BrowserContext, cfg: SessionConfig) -> Page:
+    page = await context.new_page()
+    await _apply_stealth(page)
+
+    # Force-set viewport explicitly on the page.
+    try:
+        await page.set_viewport_size(cfg.viewport)
+    except Exception as vp_exc:
+        logger.warning(f"[fb_browser] set_viewport_size failed (non-fatal): {vp_exc}")
+
+    # Set extra HTTP headers with User-Agent override
+    try:
+        await page.set_extra_http_headers({"User-Agent": cfg.user_agent})
+    except Exception as header_exc:
+        logger.warning(f"[fb_browser] set_extra_http_headers failed (non-fatal): {header_exc}")
+
+    # Set CDP setUserAgentOverride if running via Browserless
+    if os.getenv("BROWSERLESS_WS_URL"):
+        try:
+            client = await context.new_cdp_session(page)
+            await client.send("Emulation.setUserAgentOverride", {
+                "userAgent": cfg.user_agent,
+                "platform": "Win32",
+            })
+            logger.info(f"[fb_browser] Applied CDP Emulation.setUserAgentOverride: {cfg.user_agent}")
+        except Exception as cdp_exc:
+            logger.warning(f"[fb_browser] CDP setUserAgentOverride failed: {cdp_exc}")
+
+    return page
 
 
 # ── Login detection ──────────────────────────────────────────────────────────
@@ -381,8 +419,7 @@ async def capture_login(cfg: Optional[SessionConfig] = None, timeout_s: int = 18
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=None, headless=False)
-        page = await context.new_page()
-        await _apply_stealth(page)
+        page = await _new_page(context, cfg)
         await page.goto(FB_HOME, wait_until="domcontentloaded")
 
         # Poll for the c_user cookie which appears only after a successful login.
@@ -428,8 +465,7 @@ async def validate_session(
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
-        page = await context.new_page()
-        await _apply_stealth(page)
+        page = await _new_page(context, cfg)
         try:
             await page.goto(FB_HOME, wait_until="domcontentloaded")
             await _sleep(1.0, 2.5)
@@ -456,8 +492,7 @@ async def fetch_joined_groups(
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
-        page = await context.new_page()
-        await _apply_stealth(page)
+        page = await _new_page(context, cfg)
         
         managed_list = []
         try:
@@ -649,8 +684,7 @@ async def validate_group(
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
-        page = await context.new_page()
-        await _apply_stealth(page)
+        page = await _new_page(context, cfg)
         result: Dict[str, Any] = {
             "exists": False, "privacy": "unknown", "is_member": False,
             "can_post": False, "requires_approval": False,
@@ -714,17 +748,7 @@ async def post_to_group(
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
-        page = await context.new_page()
-        await _apply_stealth(page)
-
-        # Force-set viewport explicitly on the page.
-        # When connecting via CDP (connect_over_cdp), the viewport set in new_context()
-        # may not be applied on Playwright 1.47-1.48. Calling set_viewport_size() directly
-        # on the page guarantees Facebook renders at the correct desktop resolution.
-        try:
-            await page.set_viewport_size(cfg.viewport)
-        except Exception as vp_exc:
-            logger.warning(f"[fb_browser] set_viewport_size failed (non-fatal): {vp_exc}")
+        page = await _new_page(context, cfg)
 
         try:
             await page.goto(group_url, wait_until="commit")
@@ -742,6 +766,12 @@ async def post_to_group(
                 await page.locator(combined_trigger).first.wait_for(state="attached", timeout=20000)
             except Exception:
                 # Capture diagnostic info so we know WHAT page was shown
+                try:
+                    screenshot_path = "C:\\Users\\Admin\\.gemini\\antigravity\\brain\\7791a139-782b-46c1-9672-207670d46ba4\\diag_Mike_Tester_trigger_fail.png"
+                    await page.screenshot(path=screenshot_path)
+                    logger.info(f"[fb_browser] Saved trigger failure screenshot to {screenshot_path}")
+                except Exception as ss_exc:
+                    logger.warning(f"[fb_browser] Failed to take screenshot: {ss_exc}")
                 try:
                     page_url = page.url
                     page_title = await page.title()
@@ -817,6 +847,12 @@ async def post_to_group(
 
             if not opened:
                 try:
+                    screenshot_path = "C:\\Users\\Admin\\.gemini\\antigravity\\brain\\7791a139-782b-46c1-9672-207670d46ba4\\diag_Mike_Tester_click_fail.png"
+                    await page.screenshot(path=screenshot_path)
+                    logger.info(f"[fb_browser] Saved click failure screenshot to {screenshot_path}")
+                except Exception as ss_exc:
+                    logger.warning(f"[fb_browser] Failed to take screenshot: {ss_exc}")
+                try:
                     page_url = page.url
                     page_title = await page.title()
                     body_text = await page.evaluate(
@@ -879,6 +915,12 @@ async def post_to_group(
                     break
 
             if not textbox:
+                try:
+                    screenshot_path = "C:\\Users\\Admin\\.gemini\\antigravity\\brain\\7791a139-782b-46c1-9672-207670d46ba4\\diag_Mike_Tester_textbox_fail.png"
+                    await page.screenshot(path=screenshot_path)
+                    logger.info(f"[fb_browser] Saved textbox failure screenshot to {screenshot_path}")
+                except Exception as ss_exc:
+                    logger.warning(f"[fb_browser] Failed to take screenshot: {ss_exc}")
                 return {"success": False, "error": "Composer textbox not found."}
 
             
