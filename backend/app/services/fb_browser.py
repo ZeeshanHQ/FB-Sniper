@@ -716,6 +716,16 @@ async def post_to_group(
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
         page = await context.new_page()
         await _apply_stealth(page)
+
+        # Force-set viewport explicitly on the page.
+        # When connecting via CDP (connect_over_cdp), the viewport set in new_context()
+        # may not be applied on Playwright 1.47-1.48. Calling set_viewport_size() directly
+        # on the page guarantees Facebook renders at the correct desktop resolution.
+        try:
+            await page.set_viewport_size(cfg.viewport)
+        except Exception as vp_exc:
+            logger.warning(f"[fb_browser] set_viewport_size failed (non-fatal): {vp_exc}")
+
         try:
             await page.goto(group_url, wait_until="commit")
             await _sleep(3.0, 5.5)  # Extra wait for React/JS to render after page load
@@ -751,6 +761,8 @@ async def post_to_group(
             loc = page.locator(combined_trigger)
             count = await loc.count()
             opened = False
+
+            # First pass: prefer visible elements
             for i in range(count):
                 el = loc.nth(i)
                 if await el.is_visible():
@@ -760,15 +772,40 @@ async def post_to_group(
                     opened = True
                     break
 
+            # Second pass: if CDP viewport caused is_visible() to return False for all
+            # attached elements, try scroll_into_view + JS click on each one anyway.
+            # Facebook's composer is in the DOM but may be outside Playwright's
+            # reported viewport when CDP doesn't apply the viewport setting properly.
+            if not opened and count > 0:
+                logger.info(
+                    f"[fb_browser] No visible trigger — trying scroll+JS click on {count} attached element(s)"
+                )
+                for i in range(count):
+                    el = loc.nth(i)
+                    try:
+                        await el.scroll_into_view_if_needed(timeout=3000)
+                        await _sleep(0.3, 0.7)
+                        await el.evaluate("el => el.click()")
+                        opened = True
+                        logger.info(f"[fb_browser] Clicked trigger #{i} via scroll+JS")
+                        break
+                    except Exception as click_exc:
+                        logger.warning(f"[fb_browser] scroll+JS click on trigger #{i} failed: {click_exc}")
+                        continue
+
             if not opened:
                 try:
                     page_url = page.url
                     page_title = await page.title()
-                    logger.warning(
-                        f"[fb_browser] Trigger attached but none visible. "
-                        f"URL: {page_url!r} | Title: {page_title!r} | count={count}"
+                    body_text = await page.evaluate(
+                        "document.body ? document.body.innerText.slice(0, 400) : 'no body'"
                     )
-                    diag = f"Composer trigger not visible. Title={page_title!r} URL={page_url!r}"
+                    logger.warning(
+                        f"[fb_browser] All trigger clicks failed. "
+                        f"URL: {page_url!r} | Title: {page_title!r} | count={count} | "
+                        f"Page text: {body_text[:300]!r}"
+                    )
+                    diag = f"Composer trigger not clickable. Title={page_title!r} URL={page_url!r}"
                 except Exception:
                     diag = "Composer not found (not a member or DOM changed)."
                 return {"success": False, "error": diag}
