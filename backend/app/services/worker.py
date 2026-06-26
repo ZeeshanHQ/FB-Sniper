@@ -63,8 +63,8 @@ async def _db(fn) -> Any:
 
 async def _claim_campaign(sb: Client, campaign_id: str) -> bool:
     """
-    Atomically claim a campaign by transitioning status pending → running.
-    The WHERE status='pending' guard prevents two workers claiming the same row.
+    Atomically claim a campaign by transitioning status pending/scheduled → running.
+    The WHERE status in ('pending', 'scheduled') guard prevents two workers claiming the same row.
     Returns True only if this worker successfully claimed it.
     """
     result = await _db(lambda: (
@@ -74,7 +74,7 @@ async def _claim_campaign(sb: Client, campaign_id: str) -> bool:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
         .eq("id", campaign_id)
-        .eq("status", "pending")   # ← atomic guard
+        .in_("status", ["pending", "scheduled"])   # ← atomic guard
         .execute()
     ))
     return len(result.data or []) > 0
@@ -213,6 +213,15 @@ async def _execute_paired_comments(
     post_targets = [{"post_id": str, "page_id": Optional[str]}]
     Page posts use their page-specific token; group posts use the user token.
     """
+    camp_res = await _db(lambda: (
+        sb.table("automation_posts")
+        .select("content")
+        .eq("id", campaign_id)
+        .single()
+        .execute()
+    ))
+    post_content = camp_res.data.get("content", "") if camp_res.data else ""
+
     result = await _db(lambda: (
         sb.table("post_scheduled_comments")
         .select("*")
@@ -276,16 +285,87 @@ async def _execute_paired_comments(
 
         for target in post_targets:
             fb_post_id    = target["post_id"]
-            comment_token = await _token_for(target.get("page_id"))
-            try:
-                await meta_api.comment_on_post(fb_post_id, content, comment_token)
-                succeeded.append(fb_post_id)
-                logger.info(f"[Worker] Instant comment on fb_post {fb_post_id} (page={target.get('page_id')})")
-                await asyncio.sleep(1)
-            except Exception as exc:
-                logger.warning(f"[Worker] Instant comment failed on {fb_post_id}: {exc}")
-                failed.append(fb_post_id)
-                errors[fb_post_id] = str(exc)
+            if fb_post_id and fb_post_id.startswith("http"):
+                # Playwright comment posting!
+                try:
+                    logger.info(f"[Worker] Posting comment to group via Playwright: {fb_post_id}")
+                    g_res = await _db(lambda: (
+                        sb.table("target_groups")
+                        .select("url, session_id")
+                        .eq("user_id", user_id)
+                        .execute()
+                    ))
+                    session_id = None
+                    for row in (g_res.data or []):
+                        u1 = row.get("url") or ""
+                        u2 = fb_post_id or ""
+                        if u1.strip("/").lower() == u2.strip("/").lower():
+                            session_id = row.get("session_id")
+                            break
+                    if not session_id:
+                        for row in (g_res.data or []):
+                            u1 = row.get("url") or ""
+                            if u1.strip("/") and u1.strip("/").lower() in fb_post_id.lower():
+                                session_id = row.get("session_id")
+                                break
+
+                    if not session_id:
+                        raise RuntimeError(f"Could not find Facebook session linked to group URL: {fb_post_id}")
+
+                    s_res = await _db(lambda: (
+                        sb.table("fb_sessions")
+                        .select("storage_state, user_agent, proxy, status")
+                        .eq("id", session_id)
+                        .eq("user_id", user_id)
+                        .limit(1)
+                        .execute()
+                    ))
+                    if not s_res.data:
+                        raise RuntimeError(f"Facebook session not found (ID: {session_id[:8]}…)")
+                    srow = s_res.data[0]
+                    if srow.get("status") in ("expired", "invalid"):
+                        raise RuntimeError(f"Facebook session is {srow['status']}")
+
+                    from app.services.crypto import decrypt_state
+                    state = decrypt_state(srow["storage_state"])
+                    
+                    from app.services.fb_browser import comment_on_group_post, SessionConfig, DEFAULT_USER_AGENT
+                    cfg = SessionConfig(
+                        user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
+                        proxy=srow.get("proxy"),
+                    )
+
+                    headless = os.getenv("FB_BROWSER_HEADLESS", "true").lower() != "false"
+                    
+                    res = await comment_on_group_post(
+                        group_url=fb_post_id,
+                        post_content=post_content,
+                        comment_content=content,
+                        storage_state=state,
+                        cfg=cfg,
+                        headless=headless
+                    )
+                    if not res.get("success"):
+                        raise RuntimeError(res.get("error") or "Unknown browser automation error")
+
+                    succeeded.append(fb_post_id)
+                    logger.info(f"[Worker] Playwright comment posted on group {fb_post_id}")
+                    await asyncio.sleep(random.uniform(2, 5))
+                except Exception as exc:
+                    logger.warning(f"[Worker] Playwright comment failed on {fb_post_id}: {exc}")
+                    failed.append(fb_post_id)
+                    errors[fb_post_id] = str(exc)
+            else:
+                comment_token = await _token_for(target.get("page_id"))
+                try:
+                    await meta_api.comment_on_post(fb_post_id, content, comment_token)
+                    succeeded.append(fb_post_id)
+                    logger.info(f"[Worker] Instant comment on fb_post {fb_post_id} (page={target.get('page_id')})")
+                    await asyncio.sleep(1)
+                except Exception as exc:
+                    logger.warning(f"[Worker] Instant comment failed on {fb_post_id}: {exc}")
+                    failed.append(fb_post_id)
+                    errors[fb_post_id] = str(exc)
 
         final_status = "completed" if succeeded else "failed"
         err_msg = (
@@ -626,8 +706,18 @@ async def _fire_delayed_comment_task(sb: Client, comment: Dict) -> None:
     comment_id   = comment["id"]
     user_id      = comment["user_id"]
     content      = comment["content"]
+    post_id      = comment["post_id"]
     post_targets = comment.get("post_targets") or []
     fb_post_ids  = comment.get("fb_post_ids") or []
+
+    camp_res = await _db(lambda: (
+        sb.table("automation_posts")
+        .select("content")
+        .eq("id", post_id)
+        .single()
+        .execute()
+    ))
+    post_content = camp_res.data.get("content", "") if camp_res.data else ""
 
     # Build targets list — fall back to bare fb_post_ids if post_targets not stored
     if post_targets:
@@ -673,16 +763,87 @@ async def _fire_delayed_comment_task(sb: Client, comment: Dict) -> None:
 
     for target in targets:
         fb_post_id    = target["post_id"]
-        comment_token = await _token_for(target.get("page_id"))
-        try:
-            await meta_api.comment_on_post(fb_post_id, content, comment_token)
-            succeeded.append(fb_post_id)
-            logger.info(f"[Worker] Delayed comment on fb_post {fb_post_id} (page={target.get('page_id')})")
-            await asyncio.sleep(1)
-        except Exception as exc:
-            logger.warning(f"[Worker] Delayed comment failed on {fb_post_id}: {exc}")
-            failed.append(fb_post_id)
-            errors[fb_post_id] = str(exc)
+        if fb_post_id and fb_post_id.startswith("http"):
+            # Playwright comment posting!
+            try:
+                logger.info(f"[Worker] Posting delayed comment to group via Playwright: {fb_post_id}")
+                g_res = await _db(lambda: (
+                    sb.table("target_groups")
+                    .select("url, session_id")
+                    .eq("user_id", user_id)
+                    .execute()
+                ))
+                session_id = None
+                for row in (g_res.data or []):
+                    u1 = row.get("url") or ""
+                    u2 = fb_post_id or ""
+                    if u1.strip("/").lower() == u2.strip("/").lower():
+                        session_id = row.get("session_id")
+                        break
+                if not session_id:
+                    for row in (g_res.data or []):
+                        u1 = row.get("url") or ""
+                        if u1.strip("/") and u1.strip("/").lower() in fb_post_id.lower():
+                            session_id = row.get("session_id")
+                            break
+
+                if not session_id:
+                    raise RuntimeError(f"Could not find Facebook session linked to group URL: {fb_post_id}")
+
+                s_res = await _db(lambda: (
+                    sb.table("fb_sessions")
+                    .select("storage_state, user_agent, proxy, status")
+                    .eq("id", session_id)
+                    .eq("user_id", user_id)
+                    .limit(1)
+                    .execute()
+                ))
+                if not s_res.data:
+                    raise RuntimeError(f"Facebook session not found (ID: {session_id[:8]}…)")
+                srow = s_res.data[0]
+                if srow.get("status") in ("expired", "invalid"):
+                    raise RuntimeError(f"Facebook session is {srow['status']}")
+
+                from app.services.crypto import decrypt_state
+                state = decrypt_state(srow["storage_state"])
+                
+                from app.services.fb_browser import comment_on_group_post, SessionConfig, DEFAULT_USER_AGENT
+                cfg = SessionConfig(
+                    user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
+                    proxy=srow.get("proxy"),
+                )
+
+                headless = os.getenv("FB_BROWSER_HEADLESS", "true").lower() != "false"
+                
+                res = await comment_on_group_post(
+                    group_url=fb_post_id,
+                    post_content=post_content,
+                    comment_content=content,
+                    storage_state=state,
+                    cfg=cfg,
+                    headless=headless
+                )
+                if not res.get("success"):
+                    raise RuntimeError(res.get("error") or "Unknown browser automation error")
+
+                succeeded.append(fb_post_id)
+                logger.info(f"[Worker] Playwright delayed comment posted on group {fb_post_id}")
+                await asyncio.sleep(random.uniform(2, 5))
+            except Exception as exc:
+                logger.warning(f"[Worker] Playwright delayed comment failed on {fb_post_id}: {exc}")
+                failed.append(fb_post_id)
+                errors[fb_post_id] = str(exc)
+        else:
+            comment_token = await _token_for(target.get("page_id"))
+            try:
+                await meta_api.comment_on_post(fb_post_id, content, comment_token)
+                succeeded.append(fb_post_id)
+                logger.info(f"[Worker] Delayed comment on fb_post {fb_post_id} (page={target.get('page_id')})")
+                await asyncio.sleep(1)
+            except Exception as exc:
+                logger.warning(f"[Worker] Delayed comment failed on {fb_post_id}: {exc}")
+                failed.append(fb_post_id)
+                errors[fb_post_id] = str(exc)
 
     final_status = "completed" if succeeded else "failed"
     err_msg = (
@@ -844,7 +1005,7 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
         if frequency == "daily":
             next_run = now + timedelta(hours=24)
             await _update_campaign(sb, campaign_id, {
-                "status":       "pending",
+                "status":       "scheduled",
                 "scheduled_at": next_run.isoformat(),
                 "metadata":     {
                     **metadata,
@@ -954,7 +1115,7 @@ async def worker_loop() -> None:
             raw = await _db(lambda: (
                 sb.table("automation_posts")
                 .select("*")
-                .eq("status", "pending")
+                .in_("status", ["pending", "scheduled"])
                 .order("created_at", desc=False)
                 .limit(BATCH_SIZE * 2)   # over-fetch; we filter by scheduled_at below
                 .execute()

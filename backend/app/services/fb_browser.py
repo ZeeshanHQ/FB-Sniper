@@ -1052,3 +1052,135 @@ async def post_to_group(
             return {"success": False, "error": str(exc)}
         finally:
             await context.close()
+
+
+async def comment_on_group_post(
+    group_url: str,
+    post_content: str,
+    comment_content: str,
+    storage_state: Dict[str, Any],
+    cfg: Optional[SessionConfig] = None,
+    headless: bool = True,
+) -> Dict[str, Any]:
+    """
+    Find a recently published post containing post_content inside group_url,
+    and comment on it using browser automation.
+    """
+    cfg = cfg or SessionConfig()
+    async with async_playwright() as pw:
+        context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
+        page = await _new_page(context, cfg)
+        try:
+            await page.goto(group_url, wait_until="commit")
+            await _sleep(4.0, 7.0)  # Wait for React to render
+
+            # Scroll a bit to trigger feed load
+            await _human_scroll(page, times=1)
+            await _sleep(1.0, 2.0)
+
+            # Collapse whitespaces in the post content snippet for matching
+            lines = [l.strip() for l in post_content.splitlines() if l.strip()]
+            snippet = lines[0][:80] if lines else post_content[:80]
+            snippet = " ".join(snippet.split()).strip()
+
+            logger.info(f"[fb_browser] Searching for post containing snippet: {snippet!r}")
+
+            # Walk the DOM to find the post container and label it
+            found = await page.evaluate("""
+                (snip) => {
+                    const elements = Array.from(document.querySelectorAll('span, div, p'));
+                    const match = elements.find(el => {
+                        if (el.children.length > 0) return false;
+                        const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ');
+                        return text.includes(snip);
+                    });
+                    if (!match) return false;
+                    
+                    let curr = match;
+                    while (curr && curr !== document.body) {
+                        const role = curr.getAttribute('role');
+                        const testid = curr.getAttribute('data-testid');
+                        if (role === 'article' || testid === 'post_container' || testid === 'fbfeed_story') {
+                            curr.setAttribute('data-sniper-target-post', 'true');
+                            return true;
+                        }
+                        if (curr.parentElement && curr.parentElement.getAttribute('role') === 'feed') {
+                            curr.setAttribute('data-sniper-target-post', 'true');
+                            return true;
+                        }
+                        curr = curr.parentElement;
+                    }
+                    match.setAttribute('data-sniper-target-post', 'true');
+                    return true;
+                }
+            """, snippet)
+
+            if not found:
+                try:
+                    screenshot_path = "C:\\Users\\Admin\\.gemini\\antigravity\\brain\\7791a139-782b-46c1-9672-207670d46ba4\\diag_comment_find_fail.png"
+                    await page.screenshot(path=screenshot_path)
+                    logger.info(f"[fb_browser] Saved search failure screenshot to {screenshot_path}")
+                except Exception as ss_exc:
+                    logger.warning(f"[fb_browser] Failed to take screenshot: {ss_exc}")
+                return {"success": False, "error": f"Could not find the post containing text snippet: {snippet!r}"}
+
+            post_container = page.locator('[data-sniper-target-post="true"]').first
+            await post_container.scroll_into_view_if_needed()
+            await _sleep(0.5, 1.5)
+
+            # Locate Comment action / input
+            comment_btn = post_container.locator('[aria-label="Leave a comment"], [aria-label="Write a comment"], [aria-label="Comment"], [role="button"]:has-text("Comment")')
+            textbox_sel = 'div[role="textbox"][contenteditable="true"]'
+            textbox = post_container.locator(textbox_sel).first
+
+            if not await textbox.count() or not await textbox.is_visible():
+                if await comment_btn.count() > 0:
+                    logger.info("[fb_browser] Clicking Comment button to focus textbox")
+                    await _human_hover_around(page, comment_btn.first)
+                    await _sleep(0.2, 0.5)
+                    await comment_btn.first.click()
+                    await _sleep(1.0, 2.5)
+
+            # Re-locate textbox
+            textbox = post_container.locator(textbox_sel).first
+            if not await textbox.count():
+                # fallback inside container
+                textbox = post_container.locator('div[contenteditable="true"]').first
+
+            if not await textbox.count():
+                try:
+                    screenshot_path = "C:\\Users\\Admin\\.gemini\\antigravity\\brain\\7791a139-782b-46c1-9672-207670d46ba4\\diag_comment_textbox_fail.png"
+                    await page.screenshot(path=screenshot_path)
+                except Exception:
+                    pass
+                return {"success": False, "error": "Comment textbox not found inside post container."}
+
+            await _human_hover_around(page, textbox)
+            await textbox.evaluate("el => { el.focus(); el.click(); }")
+            await _sleep(0.3, 0.7)
+
+            await _human_type(page, textbox, comment_content)
+            await _sleep(0.5, 1.5)
+
+            # Press enter to submit
+            await page.keyboard.press("Enter")
+            logger.info("[fb_browser] Pressed Enter to submit comment")
+            await _sleep(3.0, 5.0)
+
+            # Optional Send button click if text wasn't cleared
+            textbox_text = await textbox.evaluate("el => el.innerText || el.textContent || ''")
+            if textbox_text.strip():
+                logger.info("[fb_browser] Comment textbox still has text, searching for submit button")
+                submit_btn = post_container.locator('div[aria-label="Comment"][role="button"], div[aria-label="Post"][role="button"], [aria-label*="comment" i][role="button"]').first
+                if await submit_btn.count() > 0:
+                    await submit_btn.click()
+                    await _sleep(3.0, 5.0)
+
+            return {"success": True, "error": None}
+
+        except PWTimeout as exc:
+            return {"success": False, "error": f"Timeout: {exc}"}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        finally:
+            await context.close()

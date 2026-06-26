@@ -70,6 +70,16 @@ async def schedule_post(req: SchedulePostRequest):
 
     sb = _sb()
     try:
+        from datetime import datetime, timezone
+        initial_status = "pending"
+        if req.scheduled_at:
+            try:
+                sched_dt = datetime.fromisoformat(req.scheduled_at.replace("Z", "+00:00"))
+                if sched_dt > datetime.now(timezone.utc):
+                    initial_status = "scheduled"
+            except Exception:
+                pass
+
         post_row = (
             sb.table("automation_posts")
             .insert({
@@ -77,7 +87,7 @@ async def schedule_post(req: SchedulePostRequest):
                 "content":       req.content.strip(),
                 "target_groups": req.target_groups,
                 "target_pages":  req.target_pages,
-                "status":        "pending",
+                "status":        initial_status,
                 "scheduled_at":  req.scheduled_at,
                 "metadata": {
                     "action_type": "Post to group/page",
