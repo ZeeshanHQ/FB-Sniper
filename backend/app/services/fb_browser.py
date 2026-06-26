@@ -495,9 +495,9 @@ async def fetch_joined_groups(
                             const gid = match[1];
                             if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
                                 const firstSpan = el.querySelector('span');
-                                let nameText = firstSpan ? (firstSpan.innerText || firstSpan.textContent || '').trim() : (el.innerText || el.textContent || '').trim().split('\n')[0].trim();
-                                // Replace all spaces (including non-breaking spaces like \u00A0) with standard spaces
-                                nameText = nameText.replace(/\s+/g, ' ');
+                                 let nameText = firstSpan ? (firstSpan.innerText || firstSpan.textContent || '').trim() : (el.innerText || el.textContent || '').trim().split('\\n')[0].trim();
+                                 // Replace all spaces (including non-breaking spaces like \\u00A0) with standard spaces
+                                 nameText = nameText.replace(/\\s+/g, ' ');
                                 // Clean up trailing activity indicators
                                 nameText = nameText.replace(/(?:last active|active|about|hour|hours|minute|minutes|just now|yesterday|días|horas|minutos|activa).*/i, '').trim();
                                 
