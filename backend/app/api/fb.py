@@ -345,13 +345,6 @@ async def fetch_groups(req: FetchGroupsRequest):
 
     groups = res.get("groups", [])
     if req.persist and groups:
-        existing = (
-            sb.table("target_groups")
-            .select("fb_group_id")
-            .eq("user_id", req.user_id)
-            .execute()
-        )
-        have = {r.get("fb_group_id") for r in (existing.data or [])}
         rows = [
             {
                 "user_id": req.user_id,
@@ -361,13 +354,12 @@ async def fetch_groups(req: FetchGroupsRequest):
                 "fb_group_id": g["id"],
                 "is_member": True,
                 "validation_status": "valid",
+                "is_active": True,
                 "last_checked_at": _now(),
             }
             for g in groups
-            if g["id"] not in have
         ]
-        if rows:
-            sb.table("target_groups").insert(rows).execute()
+        sb.table("target_groups").upsert(rows, on_conflict="user_id,fb_group_id").execute()
 
     return {"success": True, "groups": groups, "count": len(groups)}
 
