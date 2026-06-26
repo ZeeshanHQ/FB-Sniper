@@ -696,14 +696,35 @@ async def post_to_group(
         await _apply_stealth(page)
         try:
             await page.goto(group_url, wait_until="commit")
-            await _sleep(2.5, 4.5)
+            await _sleep(3.0, 5.5)  # Extra wait for React/JS to render after page load
+
+            # Scroll slightly to trigger lazy loading of composer
+            await page.evaluate("window.scrollBy(0, 200)")
+            await _sleep(0.5, 1.0)
+            await page.evaluate("window.scrollBy(0, -200)")
+            await _sleep(0.5, 1.0)
 
             # Open composer with human-like interaction (using combined selector to wait efficiently)
             combined_trigger = ', '.join(SELECTORS["group_composer_trigger"])
             try:
-                await page.locator(combined_trigger).first.wait_for(state="attached", timeout=15000)
+                await page.locator(combined_trigger).first.wait_for(state="attached", timeout=20000)
             except Exception:
-                return {"success": False, "error": "Composer not found (not a member or DOM changed)."}
+                # Capture diagnostic info so we know WHAT page was shown
+                try:
+                    page_url = page.url
+                    page_title = await page.title()
+                    body_text = await page.evaluate(
+                        "document.body ? document.body.innerText.slice(0, 500) : 'no body'"
+                    )
+                    logger.warning(
+                        f"[fb_browser] Composer not found. "
+                        f"URL: {page_url!r} | Title: {page_title!r} | "
+                        f"Page text: {body_text[:300]!r}"
+                    )
+                    diag = f"Composer not found. Title={page_title!r} URL={page_url!r}"
+                except Exception:
+                    diag = "Composer not found (not a member or DOM changed)."
+                return {"success": False, "error": diag}
 
             loc = page.locator(combined_trigger)
             count = await loc.count()
@@ -718,7 +739,18 @@ async def post_to_group(
                     break
 
             if not opened:
-                return {"success": False, "error": "Composer not found (not a member or DOM changed)."}
+                try:
+                    page_url = page.url
+                    page_title = await page.title()
+                    logger.warning(
+                        f"[fb_browser] Trigger attached but none visible. "
+                        f"URL: {page_url!r} | Title: {page_title!r} | count={count}"
+                    )
+                    diag = f"Composer trigger not visible. Title={page_title!r} URL={page_url!r}"
+                except Exception:
+                    diag = "Composer not found (not a member or DOM changed)."
+                return {"success": False, "error": diag}
+
 
             await _sleep(1.2, 2.8)
             
