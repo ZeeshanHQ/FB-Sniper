@@ -417,7 +417,8 @@ async def fetch_joined_groups(
             managed_groups = await page.evaluate("""
             () => {
                 const sidebar = document.querySelector('div[role="navigation"]') || document.body;
-                const elements = Array.from(sidebar.querySelectorAll('span, div, h1, h2, h3, a[href*="/groups/"]'));
+                // Exclude 'div' tags to prevent parent wrapper containers from matching keywords and breaking the sequence
+                const elements = Array.from(sidebar.querySelectorAll('span, h1, h2, h3, a'));
                 let inManagedSection = false;
                 const managedGroups = {};
                 
@@ -433,26 +434,22 @@ async def fetch_joined_groups(
                 ];
                 
                 for (const el of elements) {
-                    const tag = el.tagName;
+                    const tag = el.tagName.toUpperCase();
                     const text = (el.textContent || '').trim();
                     const lowerText = text.toLowerCase();
                     
                     if (tag !== 'A') {
-                        if (managedKeywords.some(kw => lowerText === kw || (lowerText.startsWith(kw) && lowerText.length < 40))) {
+                        if (managedKeywords.includes(lowerText)) {
                             inManagedSection = true;
                             continue;
                         }
-                        if (inManagedSection && exitKeywords.some(kw => lowerText === kw || (lowerText.startsWith(kw) && lowerText.length < 40))) {
-                            // If it's a see all link, don't exit
-                            if (lowerText === 'see all' && el.closest('a')) {
-                                continue;
-                            }
+                        if (inManagedSection && exitKeywords.includes(lowerText)) {
                             inManagedSection = false;
                             break;
                         }
                     } else {
                         if (inManagedSection) {
-                            const href = el.href || '';
+                            const href = el.getAttribute('href') || el.href || '';
                             const match = href.match(/\/groups\/([^/?#]+)/);
                             if (match) {
                                 const gid = match[1];
