@@ -1891,7 +1891,7 @@ export default function DashboardPage() {
                     { n: "1", t: "Open Chrome Extensions", code: "Go to chrome://extensions in your browser URL bar" },
                     { n: "2", t: "Enable Developer Mode", code: "Toggle the 'Developer mode' switch in the top-right corner" },
                     { n: "3", t: "Load Extension", code: "Click 'Load unpacked' in the top-left and select the 'extension' folder in this project's directory" },
-                    { n: "4", t: "Set Server API URL inside Extension Popup", code: process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper-api.onrender.com" },
+                    { n: "4", t: "Set Server API URL inside Extension Popup", code: process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper.onrender.com" },
                   ].map(({ n, t, code }) => (
                     <div key={n} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
                       <div style={{ width: "22px", height: "22px", borderRadius: "50%", backgroundColor: "#1d1d1d", color: "#fff", fontSize: "0.6875rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "1px" }}>{n}</div>
