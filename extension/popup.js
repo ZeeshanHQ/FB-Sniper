@@ -70,16 +70,22 @@ document.addEventListener('DOMContentLoaded', () => {
         };
       });
 
-      // 2. Fetch user profile page to grab their real name
+      // 2. Fetch user profile page to grab their real name (include credentials to send active session cookies)
       let fbAccountName = 'Facebook Account';
       try {
-        const fbResponse = await fetch('https://www.facebook.com/me/');
+        const fbResponse = await fetch('https://www.facebook.com/me/', {
+          credentials: 'include'
+        });
         if (fbResponse.ok) {
           const html = await fbResponse.text();
           // Extract Facebook's title tag which usually contains the user's name
           const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
           if (titleMatch && titleMatch[1]) {
-            const parsedName = titleMatch[1].replace(' | Facebook', '').trim();
+            // Strip notification counts like (1) or (9+) from the title
+            const parsedName = titleMatch[1]
+              .replace(/^\(\d+\+?\)\s*/, '')
+              .replace(' | Facebook', '')
+              .trim();
             if (parsedName && parsedName.toLowerCase() !== 'facebook') {
               fbAccountName = parsedName;
             }

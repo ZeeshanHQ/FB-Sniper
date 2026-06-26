@@ -1939,8 +1939,41 @@ export default function DashboardPage() {
                 return (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.875rem 1.375rem", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                      <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: isExpired ? "#fef2f2" : "#eff6ff", border: `1px solid ${isExpired ? "#fecaca" : "#bfdbfe"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <User size={16} color={isExpired ? "#ef4444" : "#3b82f6"} strokeWidth={2} />
+                      <div style={{ position: "relative", width: "36px", height: "36px", flexShrink: 0 }}>
+                        {s.fb_account_id ? (
+                          <img 
+                            src={`https://graph.facebook.com/${s.fb_account_id}/picture?type=large`} 
+                            alt="FB Profile" 
+                            style={{ 
+                              width: "36px", 
+                              height: "36px", 
+                              borderRadius: "50%", 
+                              objectFit: "cover",
+                              display: "block",
+                              border: `1px solid ${isExpired ? "#fecaca" : "#bfdbfe"}`
+                            }}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              const fallback = e.currentTarget.parentElement?.querySelector('.fallback-icon') as HTMLElement;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div 
+                          className="fallback-icon"
+                          style={{ 
+                            position: "absolute",
+                            inset: 0,
+                            borderRadius: "50%", 
+                            backgroundColor: isExpired ? "#fef2f2" : "#eff6ff", 
+                            border: `1px solid ${isExpired ? "#fecaca" : "#bfdbfe"}`, 
+                            display: s.fb_account_id ? "none" : "flex", 
+                            alignItems: "center", 
+                            justifyContent: "center"
+                          }}
+                        >
+                          <User size={16} color={isExpired ? "#ef4444" : "#3b82f6"} strokeWidth={2} />
+                        </div>
                       </div>
                       <div>
                         <p style={{ margin: 0, fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)" }}>{s.fb_account_name || "Facebook Account"}</p>
