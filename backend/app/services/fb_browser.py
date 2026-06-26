@@ -26,6 +26,7 @@ IMPORTANT (honesty):
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 import random
 from dataclasses import dataclass, field
@@ -252,19 +253,31 @@ def _parse_proxy(proxy: Optional[str]) -> Optional[Dict[str, str]]:
 async def _new_context(
     pw, cfg: SessionConfig, storage_state: Optional[Dict[str, Any]], headless: bool
 ) -> BrowserContext:
-    launch_kwargs: Dict[str, Any] = {
-        "headless": headless,
-        "args": [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-        ],
-    }
-    proxy = _parse_proxy(cfg.proxy)
-    if proxy:
-        launch_kwargs["proxy"] = proxy
+    ws_url = os.getenv("BROWSERLESS_WS_URL")
+    if ws_url:
+        token = os.getenv("BROWSERLESS_TOKEN", "astraventa_sniper_2026")
+        connect_url = f"{ws_url}?token={token}&stealth"
+        if cfg.proxy:
+            connect_url += f"&--proxy-server={cfg.proxy}"
+        
+        logger.info(f"[fb_browser] Connecting to Browserless via CDP for consistent footprint: {ws_url}")
+        browser = await pw.chromium.connect_over_cdp(connect_url)
+    else:
+        launch_kwargs: Dict[str, Any] = {
+            "headless": headless,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        }
+        proxy = _parse_proxy(cfg.proxy)
+        if proxy:
+            launch_kwargs["proxy"] = proxy
 
-    browser = await pw.chromium.launch(**launch_kwargs)
+        logger.info("[fb_browser] Launching local Chromium instance")
+        browser = await pw.chromium.launch(**launch_kwargs)
+
     context = await browser.new_context(
         user_agent=cfg.user_agent,
         viewport=cfg.viewport,
