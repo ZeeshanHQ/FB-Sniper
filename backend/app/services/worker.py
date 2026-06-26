@@ -703,12 +703,8 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
     )
 
     try:
-        # ── 1. Resolve Meta token ─────────────────────────────────────────
+        # ── 1. Resolve Meta token (optional if only posting to Playwright groups) ──
         token = await _get_user_token(sb, user_id)
-        if not token:
-            raise RuntimeError(
-                "No active Meta token. User must reconnect Facebook in the dashboard."
-            )
 
         # ── 2. Init Meta API client ───────────────────────────────────────
         from app.services.meta import get_meta_api  # lazy import keeps startup fast
@@ -724,6 +720,15 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
 
         if not target_groups and not target_page_ids:
             raise RuntimeError("Campaign has no valid targets. Add groups or pages first.")
+
+        # Require token ONLY if page posts, api group posts, or Graph API actions (like/comment triggers) are requested
+        has_api_targets = bool(target_page_ids) or any(not g.get("session_id") for g in target_groups)
+        requires_token = has_api_targets or action_type in ("Like posts", "Comment on post")
+
+        if requires_token and not token:
+            raise RuntimeError(
+                "No active Meta token. User must reconnect Facebook in the dashboard to post to pages or perform Graph API actions."
+            )
 
         target_desc = (
             f"{len(target_groups)} group(s), {len(target_page_ids)} page(s)"
