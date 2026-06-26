@@ -284,17 +284,44 @@ async def _new_context(
 ) -> BrowserContext:
     ws_url = os.getenv("BROWSERLESS_WS_URL")
     proxy_details = _parse_proxy(cfg.proxy)
-    
+
+    context_kwargs: Dict[str, Any] = {
+        "user_agent": cfg.user_agent,
+        "viewport": cfg.viewport,
+        "locale": cfg.locale,
+        "timezone_id": cfg.timezone,
+    }
+    if storage_state:
+        context_kwargs["storage_state"] = storage_state
+
     if ws_url:
         token = os.getenv("BROWSERLESS_TOKEN", "astraventa_sniper_2026")
         connect_url = f"{ws_url}?token={token}&stealth"
         if proxy_details:
             connect_url += f"&--proxy-server={proxy_details['server']}"
             if proxy_details.get("username") and proxy_details.get("password"):
-                connect_url += f"&--proxy-username={proxy_details['username']}&--proxy-password={proxy_details['password']}"
-        
-        logger.info(f"[fb_browser] Connecting to Browserless via CDP for consistent footprint: {ws_url}")
+                connect_url += (
+                    f"&--proxy-username={proxy_details['username']}"
+                    f"&--proxy-password={proxy_details['password']}"
+                )
+
+        logger.info(f"[fb_browser] Connecting to Browserless via CDP: {ws_url}")
         browser = await pw.chromium.connect_over_cdp(connect_url)
+        context = await browser.new_context(**context_kwargs)
+
+        # Belt-and-suspenders: explicitly apply cookies after context creation.
+        # On Playwright 1.47.x, storage_state injection via connect_over_cdp can
+        # silently fail (cookies not set) because we're talking to an already-running
+        # Chrome process rather than a Playwright-managed one.
+        # Calling add_cookies() guarantees the Facebook session is active.
+        if storage_state and storage_state.get("cookies"):
+            try:
+                await context.add_cookies(storage_state["cookies"])
+                logger.info(
+                    f"[fb_browser] Applied {len(storage_state['cookies'])} session cookies to context"
+                )
+            except Exception as exc:
+                logger.warning(f"[fb_browser] add_cookies fallback failed (non-fatal): {exc}")
     else:
         launch_kwargs: Dict[str, Any] = {
             "headless": headless,
@@ -305,7 +332,7 @@ async def _new_context(
             ],
         }
         if proxy_details:
-            p_dict = {"server": proxy_details["server"]}
+            p_dict: Dict[str, str] = {"server": proxy_details["server"]}
             if proxy_details.get("username"):
                 p_dict["username"] = proxy_details["username"]
             if proxy_details.get("password"):
@@ -314,14 +341,9 @@ async def _new_context(
 
         logger.info("[fb_browser] Launching local Chromium instance")
         browser = await pw.chromium.launch(**launch_kwargs)
+        context = await browser.new_context(**context_kwargs)
 
-    context = await browser.new_context(
-        user_agent=cfg.user_agent,
-        viewport=cfg.viewport,
-        locale=cfg.locale,
-        timezone_id=cfg.timezone,
-        storage_state=storage_state if storage_state else None,
-    )
+
     # Light fingerprint hardening even without the stealth package.
     await context.add_init_script(
         "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
