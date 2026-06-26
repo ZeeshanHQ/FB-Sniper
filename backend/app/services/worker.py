@@ -352,69 +352,101 @@ async def _playwright_post_to_groups(
     """
     from app.services.fb_browser import post_to_group, SessionConfig, DEFAULT_USER_AGENT
     from app.services.crypto import decrypt_state
+    import tempfile
+    import httpx
 
     headless = os.getenv("FB_BROWSER_HEADLESS", "true").lower() != "false"
     created: List[Dict[str, Optional[str]]] = []
 
-    # Group rows by session_id so we load each session once.
-    sessions_needed: Dict[str, List[Dict]] = {}
-    for g in target_groups:
-        sid = g.get("session_id")
-        if not sid:
-            logger.warning(f"[Worker] Group '{g.get('name')}' has no session — skipping.")
-            continue
-        sessions_needed.setdefault(sid, []).append(g)
-
-    for session_id, groups in sessions_needed.items():
-        # Load + decrypt session
-        s_res = await _db(lambda: (
-            sb.table("fb_sessions")
-            .select("storage_state, user_agent, proxy, status")
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        ))
-        rows = s_res.data or []
-        if not rows:
-            logger.warning(f"[Worker] Session {session_id} not found — skipping groups.")
-            continue
-        srow = rows[0]
-        if srow.get("status") in ("expired", "invalid"):
-            logger.warning(f"[Worker] Session {session_id} is {srow['status']} — skipping groups.")
-            continue
+    # Download image once per campaign execution if media_url is provided
+    temp_img_path = None
+    if media_url:
         try:
-            state = decrypt_state(srow["storage_state"])
+            logger.info(f"[Worker] Downloading image from {media_url} for Playwright posting...")
+            suffix = ".jpg"
+            if ".png" in media_url.lower():
+                suffix = ".png"
+            elif ".gif" in media_url.lower():
+                suffix = ".gif"
+            
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(media_url, timeout=30)
+                    resp.raise_for_status()
+                    tmp.write(resp.content)
+                temp_img_path = tmp.name
+            logger.info(f"[Worker] Downloaded image to {temp_img_path}")
         except Exception as exc:
-            logger.error(f"[Worker] Cannot decrypt session {session_id}: {exc}")
-            continue
+            logger.error(f"[Worker] Failed to download image from {media_url}: {exc}")
+            temp_img_path = None
 
-        cfg = SessionConfig(
-            user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
-            proxy=srow.get("proxy"),
-        )
-
-        for g in groups:
-            group_url = g.get("url", "")
-            if not group_url:
-                logger.warning(f"[Worker] Group '{g.get('name')}' has no URL — skipping.")
+    try:
+        # Group rows by session_id so we load each session once.
+        sessions_needed: Dict[str, List[Dict]] = {}
+        for g in target_groups:
+            sid = g.get("session_id")
+            if not sid:
+                logger.warning(f"[Worker] Group '{g.get('name')}' has no session — skipping.")
                 continue
-            result = await post_to_group(
-                group_url=group_url,
-                content=content,
-                storage_state=state,
-                image_path=None,   # media_url → download first if needed
-                cfg=cfg,
-                headless=headless,
+            sessions_needed.setdefault(sid, []).append(g)
+
+        for session_id, groups in sessions_needed.items():
+            # Load + decrypt session
+            s_res = await _db(lambda: (
+                sb.table("fb_sessions")
+                .select("storage_state, user_agent, proxy, status")
+                .eq("id", session_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            ))
+            rows = s_res.data or []
+            if not rows:
+                logger.warning(f"[Worker] Session {session_id} not found — skipping groups.")
+                continue
+            srow = rows[0]
+            if srow.get("status") in ("expired", "invalid"):
+                logger.warning(f"[Worker] Session {session_id} is {srow['status']} — skipping groups.")
+                continue
+            try:
+                state = decrypt_state(srow["storage_state"])
+            except Exception as exc:
+                logger.error(f"[Worker] Cannot decrypt session {session_id}: {exc}")
+                continue
+
+            cfg = SessionConfig(
+                user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
+                proxy=srow.get("proxy"),
             )
-            if result.get("success"):
-                label = "(pending approval)" if result.get("pending_approval") else "(posted)"
-                created.append({"post_id": group_url, "page_id": None})
-                logger.info(f"[Worker] Playwright posted to '{g.get('name')}' {label}")
-            else:
-                logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {result.get('error')}")
-            # Human-paced inter-group delay
-            await asyncio.sleep(random.uniform(8, 18))
+
+            for g in groups:
+                group_url = g.get("url", "")
+                if not group_url:
+                    logger.warning(f"[Worker] Group '{g.get('name')}' has no URL — skipping.")
+                    continue
+                result = await post_to_group(
+                    group_url=group_url,
+                    content=content,
+                    storage_state=state,
+                    image_path=temp_img_path,
+                    cfg=cfg,
+                    headless=headless,
+                )
+                if result.get("success"):
+                    label = "(pending approval)" if result.get("pending_approval") else "(posted)"
+                    created.append({"post_id": group_url, "page_id": None})
+                    logger.info(f"[Worker] Playwright posted to '{g.get('name')}' {label}")
+                else:
+                    logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {result.get('error')}")
+                # Human-paced inter-group delay
+                await asyncio.sleep(random.uniform(8, 18))
+    finally:
+        if temp_img_path and os.path.exists(temp_img_path):
+            try:
+                os.remove(temp_img_path)
+                logger.info(f"[Worker] Cleaned up temporary image: {temp_img_path}")
+            except Exception as e:
+                logger.warning(f"[Worker] Failed to remove temp image {temp_img_path}: {e}")
 
     return created
 
