@@ -396,32 +396,36 @@ async def fetch_joined_groups(
     max_scroll: int = 8,
     headless: bool = True,
 ) -> Dict[str, Any]:
-    """Scrape 'Groups you manage' from groups home sidebar. Fallback to joined groups validation if none found."""
+    """Scrape 'Groups you manage' from groups home sidebar."""
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
         page = await context.new_page()
         await _apply_stealth(page)
         try:
-            # 1. Try to fetch groups you manage from the main Groups page sidebar
+            # 1. Navigating to the main Groups page
             logger.info("[fb_browser] Navigating to https://www.facebook.com/groups/ to look for managed groups...")
             await page.goto("https://www.facebook.com/groups/", wait_until="domcontentloaded")
             await _sleep(3.0, 5.0)
 
-            # Scroll the sidebar slightly to trigger React lazy-loading of items if needed
+            # Scroll all scrollable navigation/sidebar elements to trigger React lazy-loading
             try:
-                sidebar = page.locator('div[role="navigation"]').first
-                if await sidebar.count():
-                    await sidebar.evaluate("el => el.scrollTop = 500")
-                    await _sleep(1.0, 2.0)
-            except Exception:
-                pass
+                await page.evaluate("""
+                () => {
+                    const navigations = Array.from(document.querySelectorAll('div[role="navigation"], div[aria-label="Groups"], div.x1iyjqo2'));
+                    for (const nav of navigations) {
+                        if (nav.innerText.includes('groups') || nav.innerText.includes('Groups') || nav.scrollHeight > nav.clientHeight) {
+                            nav.scrollTop = 1000;
+                        }
+                    }
+                }
+                """)
+                await _sleep(1.5, 3.0)
+            except Exception as e:
+                logger.warning(f"[fb_browser] Error scrolling sidebar: {e}")
 
             managed_groups = await page.evaluate("""
             () => {
-                const sidebar = document.querySelector('div[role="navigation"]') || document.body;
-                const allElements = Array.from(sidebar.querySelectorAll('span, h1, h2, h3, a'));
-                
                 // Normalizes text to lowercase and replaces curly quotes with standard ones
                 const norm = (str) => (str || '').trim().toLowerCase().replace(/[\\u2018\\u2019’']/g, "'");
 
@@ -436,10 +440,9 @@ async def fetch_joined_groups(
                     "see all"
                 ];
 
-                // 1. Find deepest header containing "Groups you manage"
-                const manageCandidates = allElements.filter(el => {
-                    const tag = el.tagName.toUpperCase();
-                    if (tag === 'A') return false;
+                // 1. Find deepest header containing "Groups you manage" in document.body
+                const headerCandidates = Array.from(document.body.querySelectorAll('span, h1, h2, h3, h4'));
+                const manageCandidates = headerCandidates.filter(el => {
                     const val = norm(el.textContent);
                     return managedKeywords.includes(val);
                 });
@@ -447,12 +450,26 @@ async def fetch_joined_groups(
                     return !Array.from(el.querySelectorAll('*')).some(child => manageCandidates.includes(child));
                 });
 
-                if (!header) return []; // Header not found
+                if (!header) return [];
 
-                // 2. Find deepest exit header containing "Groups you've joined"
-                const exitCandidates = allElements.filter(el => {
-                    const tag = el.tagName.toUpperCase();
-                    if (tag === 'A') return false;
+                // 2. Find the container (sidebar) that contains this header
+                let container = header.closest('div[role="navigation"]') || header.closest('div[aria-label="Groups"]') || header.closest('nav');
+                if (!container) {
+                    // Fallback to traversing up to 5 levels to find a suitable list div
+                    let parent = header.parentElement;
+                    for (let i = 0; i < 5 && parent; i++) {
+                        if (parent.tagName.toUpperCase() === 'DIV' && parent.querySelectorAll('a[href*="/groups/"]').length > 0) {
+                            container = parent;
+                            break;
+                        }
+                        parent = parent.parentElement;
+                    }
+                }
+                if (!container) container = document.body;
+
+                // 3. Find exit header inside this container
+                const containerElements = Array.from(container.querySelectorAll('span, h1, h2, h3, h4'));
+                const exitCandidates = containerElements.filter(el => {
                     const val = norm(el.textContent);
                     return exitKeywords.includes(val);
                 });
@@ -460,9 +477,10 @@ async def fetch_joined_groups(
                     return !Array.from(el.querySelectorAll('*')).some(child => exitCandidates.includes(child));
                 });
 
-                // 3. Extract all links pointing to groups that appear between header and exitHeader in DOM order
+                // 4. Extract all links pointing to groups that appear between header and exitHeader in DOM order
                 const managedGroups = {};
-                for (const el of allElements) {
+                const allContainerElements = Array.from(container.querySelectorAll('span, h1, h2, h3, a'));
+                for (const el of allContainerElements) {
                     if (el.tagName.toUpperCase() !== 'A') continue;
                     
                     // Must be after header
@@ -476,7 +494,6 @@ async def fetch_joined_groups(
                         if (match) {
                             const gid = match[1];
                             if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
-                                // innerText preserves block/newline layout so we can split and get the clean name
                                 const text = (el.innerText || el.textContent || '').trim();
                                 const cleanName = text.split('\\n')[0].trim();
                                 if (cleanName && cleanName.length > 1 && !managedGroups[gid]) {
@@ -494,89 +511,10 @@ async def fetch_joined_groups(
             }
             """)
 
-            if managed_groups:
-                logger.info(f"[fb_browser] Found {len(managed_groups)} managed groups via groups home sidebar.")
-                return {"success": True, "groups": managed_groups}
-
-            # 2. Fallback: Scrape all joined groups and validate posting permissions (old behavior)
-            logger.info("[fb_browser] No managed groups found in sidebar. Falling back to all joined groups list validation.")
-            await page.goto(FB_GROUPS_JOINED, wait_until="domcontentloaded")
-            await _sleep(2.0, 4.0)
-            await _human_scroll(page, times=max_scroll)
-
-            anchors = await page.eval_on_selector_all(
-                'a[href*="/groups/"]',
-                """els => els.map(a => ({ href: a.href, text: (a.innerText||'').trim() }))""",
-            )
-            scraped_groups: Dict[str, Dict[str, str]] = {}
-            for a in anchors:
-                href = a.get("href", "")
-                import re
-                m = re.search(r"/groups/([^/?#]+)", href)
-                if not m:
-                    continue
-                gid = m.group(1)
-                if gid in ("joins", "feed", "discover", "create"):
-                    continue
-                text = a.get("text", "")
-                if gid not in scraped_groups and text:
-                    scraped_groups[gid] = {
-                        "id": gid,
-                        "name": text.split("\n")[0][:120],
-                        "url": f"https://www.facebook.com/groups/{gid}/",
-                    }
-            
-            # Close the main page to free up resources
-            await page.close()
-
-            validated_groups = []
-            
-            async def validate_one(g_info):
-                val_page = await context.new_page()
-                await _apply_stealth(val_page)
-                try:
-                    resp = await val_page.goto(g_info["url"], wait_until="domcontentloaded", timeout=15000)
-                    await _sleep(1.0, 2.5)
-                    if resp and resp.status >= 400:
-                        return None
-                    
-                    title = (await val_page.title() or "").strip().lower()
-                    if "page not found" in title or "content not found" in title:
-                        return None
-
-                    # If join button exists, user is not a member and cannot post
-                    if await val_page.locator(SELECTORS["join_button"]).count():
-                        return None
-
-                    # Check if composer triggers exist (i.e. can post)
-                    can_post = False
-                    for sel in SELECTORS["group_composer_trigger"]:
-                        if await val_page.locator(sel).count():
-                            can_post = True
-                            break
-                    
-                    if can_post:
-                        return g_info
-                except Exception as e:
-                    logger.warning(f"Error checking group posting permission for {g_info['url']}: {e}")
-                finally:
-                    await val_page.close()
-                return None
-
-            # Run validation checks concurrently with a semaphore limit of 4 pages
-            sem = asyncio.Semaphore(4)
-
-            async def sem_worker(g_info):
-                async with sem:
-                    return await validate_one(g_info)
-
-            tasks = [sem_worker(g) for g in scraped_groups.values()]
-            results = await asyncio.gather(*tasks)
-            validated_groups = [r for r in results if r is not None]
-
-            logger.info(f"Scraped {len(scraped_groups)} groups, validated {len(validated_groups)} with posting access.")
-            return {"success": True, "groups": validated_groups}
+            logger.info(f"[fb_browser] Scraped {len(managed_groups)} managed groups via groups home sidebar.")
+            return {"success": True, "groups": managed_groups}
         except Exception as exc:
+            logger.error(f"[fb_browser] Error scraping managed groups: {exc}")
             return {"success": False, "error": str(exc), "groups": []}
         finally:
             await context.close()
