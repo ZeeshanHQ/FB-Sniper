@@ -661,7 +661,7 @@ async def post_to_group(
         page = await context.new_page()
         await _apply_stealth(page)
         try:
-            await page.goto(group_url, wait_until="domcontentloaded")
+            await page.goto(group_url, wait_until="commit")
             await _sleep(2.5, 4.5)
 
             # Open composer with human-like interaction (using combined selector to wait efficiently)
@@ -679,7 +679,7 @@ async def post_to_group(
                 if await el.is_visible():
                     await _human_hover_around(page, el)
                     await _sleep(0.2, 0.6)
-                    await el.click()
+                    await el.evaluate("el => el.click()")
                     opened = True
                     break
 
@@ -795,7 +795,7 @@ async def post_to_group(
                                 break
                         await _human_hover_around(page, el)
                         await _sleep(0.3, 0.8)
-                        await el.click()
+                        await el.evaluate("el => el.click()")
                         posted = True
                         break
             
@@ -827,7 +827,7 @@ async def post_to_group(
                                     break
                             await _human_hover_around(page, el)
                             await _sleep(0.3, 0.8)
-                            await el.click()
+                            await el.evaluate("el => el.click()")
                             posted = True
                             break
                     if posted:
