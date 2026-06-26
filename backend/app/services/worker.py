@@ -389,6 +389,9 @@ async def _playwright_post_to_groups(
             logger.error(f"[Worker] Failed to download image from {media_url}: {exc}")
             temp_img_path = None
 
+    skipped_invalid_session: List[str] = []  # group names skipped due to bad session
+    skip_reason: str = ""
+
     try:
         # Group rows by session_id so we load each session once.
         sessions_needed: Dict[str, List[Dict]] = {}
@@ -396,6 +399,9 @@ async def _playwright_post_to_groups(
             sid = g.get("session_id")
             if not sid:
                 logger.warning(f"[Worker] Group '{g.get('name')}' has no session — skipping.")
+                skipped_invalid_session.append(g.get("name", "unknown"))
+                if not skip_reason:
+                    skip_reason = "No Facebook session linked to group. Please reconnect Facebook in the dashboard."
                 continue
             sessions_needed.setdefault(sid, []).append(g)
 
@@ -414,16 +420,33 @@ async def _playwright_post_to_groups(
                 ))
                 rows = s_res.data or []
                 if not rows:
-                    logger.warning(f"[Worker] Session {session_id} not found — skipping groups.")
+                    group_names = [g.get("name", "?") for g in groups]
+                    logger.warning(f"[Worker] Session {session_id} not found — skipping groups: {group_names}")
+                    skipped_invalid_session.extend(group_names)
+                    if not skip_reason:
+                        skip_reason = f"Facebook session not found (ID: {session_id[:8]}…). Please reconnect Facebook in the dashboard."
                     continue
                 srow = rows[0]
                 if srow.get("status") in ("expired", "invalid"):
-                    logger.warning(f"[Worker] Session {session_id} is {srow['status']} — skipping groups.")
+                    group_names = [g.get("name", "?") for g in groups]
+                    logger.warning(
+                        f"[Worker] Session {session_id} is {srow['status']} — skipping groups: {group_names}. "
+                        f"User must reconnect Facebook."
+                    )
+                    skipped_invalid_session.extend(group_names)
+                    if not skip_reason:
+                        skip_reason = (
+                            f"Facebook session is {srow['status']} — please reconnect Facebook in the dashboard "
+                            f"(Settings → Facebook Account → Reconnect)."
+                        )
                     continue
                 try:
                     state = decrypt_state(srow["storage_state"])
                 except Exception as exc:
                     logger.error(f"[Worker] Cannot decrypt session {session_id}: {exc}")
+                    skipped_invalid_session.extend(g.get("name", "?") for g in groups)
+                    if not skip_reason:
+                        skip_reason = f"Cannot read Facebook session data: {exc}"
                     continue
 
                 cfg = SessionConfig(
@@ -449,7 +472,10 @@ async def _playwright_post_to_groups(
                         created.append({"post_id": group_url, "page_id": None})
                         logger.info(f"[Worker] Playwright posted to '{g.get('name')}' {label}")
                     else:
-                        logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {result.get('error')}")
+                        err = result.get('error', 'unknown error')
+                        logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {err}")
+                        if not skip_reason and not created:
+                            skip_reason = err
                     # Human-paced inter-group delay
                     await asyncio.sleep(random.uniform(8, 18))
     finally:
@@ -459,6 +485,10 @@ async def _playwright_post_to_groups(
                 logger.info(f"[Worker] Cleaned up temporary image: {temp_img_path}")
             except Exception as e:
                 logger.warning(f"[Worker] Failed to remove temp image {temp_img_path}: {e}")
+
+    # If nothing was posted and we have a specific reason, surface it
+    if not created and skip_reason:
+        raise RuntimeError(skip_reason)
 
     return created
 
