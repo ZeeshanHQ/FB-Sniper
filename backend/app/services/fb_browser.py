@@ -393,7 +393,7 @@ async def fetch_joined_groups(
     max_scroll: int = 8,
     headless: bool = True,
 ) -> Dict[str, Any]:
-    """Scrape the account's joined groups → [{id, name, url}]."""
+    """Scrape the account's joined groups, then filter to keep ONLY groups where the user has posting access."""
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
@@ -408,10 +408,9 @@ async def fetch_joined_groups(
                 'a[href*="/groups/"]',
                 """els => els.map(a => ({ href: a.href, text: (a.innerText||'').trim() }))""",
             )
-            seen: Dict[str, Dict[str, str]] = {}
+            scraped_groups: Dict[str, Dict[str, str]] = {}
             for a in anchors:
                 href = a.get("href", "")
-                # Normalize to /groups/<id-or-slug>/
                 import re
                 m = re.search(r"/groups/([^/?#]+)", href)
                 if not m:
@@ -420,13 +419,65 @@ async def fetch_joined_groups(
                 if gid in ("joins", "feed", "discover", "create"):
                     continue
                 text = a.get("text", "")
-                if gid not in seen and text:
-                    seen[gid] = {
+                if gid not in scraped_groups and text:
+                    scraped_groups[gid] = {
                         "id": gid,
                         "name": text.split("\n")[0][:120],
                         "url": f"https://www.facebook.com/groups/{gid}/",
                     }
-            return {"success": True, "groups": list(seen.values())}
+            
+            # Close the main page to free up resources
+            await page.close()
+
+            # Validate each group to ensure the user has posting access (can_post = True).
+            # To avoid rate limits and massive CPU spikes, we process them in chunks/semi-parallel.
+            validated_groups = []
+            
+            async def validate_one(g_info):
+                val_page = await context.new_page()
+                await _apply_stealth(val_page)
+                try:
+                    resp = await val_page.goto(g_info["url"], wait_until="domcontentloaded", timeout=15000)
+                    await _sleep(1.0, 2.5)
+                    if resp and resp.status >= 400:
+                        return None
+                    
+                    title = (await val_page.title() or "").strip().lower()
+                    if "page not found" in title or "content not found" in title:
+                        return None
+
+                    # If join button exists, user is not a member and cannot post
+                    if await val_page.locator(SELECTORS["join_button"]).count():
+                        return None
+
+                    # Check if composer triggers exist (i.e. can post)
+                    can_post = False
+                    for sel in SELECTORS["group_composer_trigger"]:
+                        if await val_page.locator(sel).count():
+                            can_post = True
+                            break
+                    
+                    if can_post:
+                        return g_info
+                except Exception as e:
+                    logger.warning(f"Error checking group posting permission for {g_info['url']}: {e}")
+                finally:
+                    await val_page.close()
+                return None
+
+            # Run validation checks concurrently with a semaphore limit of 4 pages
+            sem = asyncio.Semaphore(4)
+
+            async def sem_worker(g_info):
+                async with sem:
+                    return await validate_one(g_info)
+
+            tasks = [sem_worker(g) for g in scraped_groups.values()]
+            results = await asyncio.gather(*tasks)
+            validated_groups = [r for r in results if r is not None]
+
+            logger.info(f"Scraped {len(scraped_groups)} groups, validated {len(validated_groups)} with posting access.")
+            return {"success": True, "groups": validated_groups}
         except Exception as exc:
             return {"success": False, "error": str(exc), "groups": []}
         finally:
