@@ -245,23 +245,53 @@ async def _human_hover_around(page: Page, selector_or_locator) -> None:
 def _parse_proxy(proxy: Optional[str]) -> Optional[Dict[str, str]]:
     if not proxy:
         return None
-    p = proxy.strip()
-    if "://" not in p:
-        p = "http://" + p
-    # Playwright accepts {"server": ..., "username":..., "password":...}
-    # Simplify: pass full URL as server; embed creds if present.
-    return {"server": p}
+    proxy_str = proxy.strip()
+    scheme = "http"
+    if "://" in proxy_str:
+        scheme, proxy_str = proxy_str.split("://", 1)
+        
+    parts = proxy_str.split(":")
+    if len(parts) == 4:
+        host, port, username, password = parts
+        return {
+            "server": f"{scheme}://{host}:{port}",
+            "username": username,
+            "password": password
+        }
+        
+    if "@" in proxy_str:
+        creds, host_port = proxy_str.split("@", 1)
+        if ":" in creds:
+            username, password = creds.split(":", 1)
+        else:
+            username = creds
+            password = ""
+        return {
+            "server": f"{scheme}://{host_port}",
+            "username": username,
+            "password": password
+        }
+        
+    return {
+        "server": f"{scheme}://{proxy_str}",
+        "username": "",
+        "password": ""
+    }
 
 
 async def _new_context(
     pw, cfg: SessionConfig, storage_state: Optional[Dict[str, Any]], headless: bool
 ) -> BrowserContext:
     ws_url = os.getenv("BROWSERLESS_WS_URL")
+    proxy_details = _parse_proxy(cfg.proxy)
+    
     if ws_url:
         token = os.getenv("BROWSERLESS_TOKEN", "astraventa_sniper_2026")
         connect_url = f"{ws_url}?token={token}&stealth"
-        if cfg.proxy:
-            connect_url += f"&--proxy-server={cfg.proxy}"
+        if proxy_details:
+            connect_url += f"&--proxy-server={proxy_details['server']}"
+            if proxy_details.get("username") and proxy_details.get("password"):
+                connect_url += f"&--proxy-username={proxy_details['username']}&--proxy-password={proxy_details['password']}"
         
         logger.info(f"[fb_browser] Connecting to Browserless via CDP for consistent footprint: {ws_url}")
         browser = await pw.chromium.connect_over_cdp(connect_url)
@@ -274,9 +304,13 @@ async def _new_context(
                 "--disable-dev-shm-usage",
             ],
         }
-        proxy = _parse_proxy(cfg.proxy)
-        if proxy:
-            launch_kwargs["proxy"] = proxy
+        if proxy_details:
+            p_dict = {"server": proxy_details["server"]}
+            if proxy_details.get("username"):
+                p_dict["username"] = proxy_details["username"]
+            if proxy_details.get("password"):
+                p_dict["password"] = proxy_details["password"]
+            launch_kwargs["proxy"] = p_dict
 
         logger.info("[fb_browser] Launching local Chromium instance")
         browser = await pw.chromium.launch(**launch_kwargs)
