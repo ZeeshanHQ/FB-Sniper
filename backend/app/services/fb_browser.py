@@ -762,7 +762,7 @@ async def post_to_group(
             count = await loc.count()
             opened = False
 
-            # First pass: prefer visible elements
+            # Pass 1: prefer elements where is_visible() = True
             for i in range(count):
                 el = loc.nth(i)
                 if await el.is_visible():
@@ -772,26 +772,48 @@ async def post_to_group(
                     opened = True
                     break
 
-            # Second pass: if CDP viewport caused is_visible() to return False for all
-            # attached elements, try scroll_into_view + JS click on each one anyway.
-            # Facebook's composer is in the DOM but may be outside Playwright's
-            # reported viewport when CDP doesn't apply the viewport setting properly.
+            # Pass 2: Playwright/CDP viewport quirk — elements may be "attached" but
+            # report as not visible. Try force-clicking role=button elements specifically
+            # (not spans — span clicks don't trigger Facebook's React modal handler).
             if not opened and count > 0:
-                logger.info(
-                    f"[fb_browser] No visible trigger — trying scroll+JS click on {count} attached element(s)"
-                )
-                for i in range(count):
-                    el = loc.nth(i)
-                    try:
-                        await el.scroll_into_view_if_needed(timeout=3000)
-                        await _sleep(0.3, 0.7)
-                        await el.evaluate("el => el.click()")
+                logger.info("[fb_browser] No visible trigger — trying force-click on role=button triggers")
+                btn_triggers = [
+                    '[role="button"]:has-text("Write something")',
+                    '[role="button"]:has-text("Discuss something")',
+                    'div[aria-label*="Create"]',
+                ]
+                for btn_sel in btn_triggers:
+                    btn = page.locator(btn_sel)
+                    if await btn.count() > 0:
+                        try:
+                            await btn.first.scroll_into_view_if_needed(timeout=3000)
+                            await _sleep(0.2, 0.5)
+                            await btn.first.click(force=True, timeout=5000)
+                            opened = True
+                            logger.info(f"[fb_browser] Force-clicked trigger: {btn_sel!r}")
+                            break
+                        except Exception as force_exc:
+                            logger.warning(f"[fb_browser] Force-click failed for {btn_sel!r}: {force_exc}")
+
+            # Pass 3: last resort — use JavaScript to find + click the button directly
+            if not opened:
+                try:
+                    clicked = await page.evaluate("""
+                        () => {
+                            const btns = Array.from(document.querySelectorAll('[role="button"]'));
+                            const target = btns.find(b => {
+                                const t = (b.innerText || b.textContent || '').trim();
+                                return t.includes('Write something') || t.includes('Discuss something');
+                            });
+                            if (target) { target.click(); return true; }
+                            return false;
+                        }
+                    """)
+                    if clicked:
                         opened = True
-                        logger.info(f"[fb_browser] Clicked trigger #{i} via scroll+JS")
-                        break
-                    except Exception as click_exc:
-                        logger.warning(f"[fb_browser] scroll+JS click on trigger #{i} failed: {click_exc}")
-                        continue
+                        logger.info("[fb_browser] Clicked trigger via page.evaluate JS search")
+                except Exception as js_exc:
+                    logger.warning(f"[fb_browser] JS trigger click failed: {js_exc}")
 
             if not opened:
                 try:
@@ -811,45 +833,54 @@ async def post_to_group(
                 return {"success": False, "error": diag}
 
 
-            await _sleep(1.2, 2.8)
-            
-            # Find the visible composer textbox inside the modal dialog
+            await _sleep(1.5, 3.0)  # Give the modal time to open after click
+
+            # Find the composer textbox inside the modal dialog.
+            # On CDP contexts, is_visible() may fail → fall back to first attached textbox.
             textbox = None
             dialog_textbox_selector = 'div[role="dialog"] div[role="textbox"][contenteditable="true"]'
-            loc = page.locator(dialog_textbox_selector)
-            
-            # Wait specifically for the dialog textbox to be attached/visible first, if dialog is present
-            try:
-                await loc.first.wait_for(state="attached", timeout=10000)
-            except Exception:
-                loc = page.locator(SELECTORS["composer_textbox"])
+            any_textbox_selector = SELECTORS["composer_textbox"]
+
+            for tb_sel in (dialog_textbox_selector, any_textbox_selector):
+                loc = page.locator(tb_sel)
                 try:
                     await loc.first.wait_for(state="attached", timeout=10000)
                 except Exception:
-                    return {"success": False, "error": "Composer textbox not found."}
-            
-            count = await loc.count()
-            for i in range(count):
-                el = loc.nth(i)
-                if await el.is_visible():
-                    # Avoid matching comment boxes
-                    placeholder = await el.get_attribute("aria-placeholder") or ""
-                    label = await el.get_attribute("aria-label") or ""
-                    if "comment" in placeholder.lower() or "comment" in label.lower():
-                        continue
-                    textbox = el
-                    break
-            
-            # Fallback to first visible textbox if no exact match found
-            if not textbox:
+                    continue
+
+                count = await loc.count()
+                # Pass 1: prefer visible textboxes that are not comment boxes
                 for i in range(count):
                     el = loc.nth(i)
                     if await el.is_visible():
+                        placeholder = (await el.get_attribute("aria-placeholder") or "").lower()
+                        label = (await el.get_attribute("aria-label") or "").lower()
+                        if "comment" in placeholder or "comment" in label:
+                            continue
                         textbox = el
                         break
 
+                # Pass 2: any visible textbox
+                if not textbox:
+                    for i in range(count):
+                        el = loc.nth(i)
+                        if await el.is_visible():
+                            textbox = el
+                            break
+
+                # Pass 3: fallback — use first ATTACHED textbox (CDP visibility quirk)
+                if not textbox and count > 0:
+                    logger.info(
+                        f"[fb_browser] No visible textbox with {tb_sel!r} — using first attached"
+                    )
+                    textbox = loc.first
+
+                if textbox:
+                    break
+
             if not textbox:
-                return {"success": False, "error": "Composer textbox is not visible."}
+                return {"success": False, "error": "Composer textbox not found."}
+
             
             # Click near textbox then focus properly using JS evaluate to bypass pointer event interception
             await _human_hover_around(page, textbox)
