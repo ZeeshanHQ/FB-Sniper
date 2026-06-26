@@ -345,21 +345,43 @@ async def fetch_groups(req: FetchGroupsRequest):
 
     groups = res.get("groups", [])
     if req.persist and groups:
-        rows = [
-            {
-                "user_id": req.user_id,
-                "session_id": req.session_id,
-                "name": g["name"],
-                "url": g["url"],
-                "fb_group_id": g["id"],
-                "is_member": True,
-                "validation_status": "valid",
-                "is_active": True,
-                "last_checked_at": _now(),
-            }
-            for g in groups
-        ]
-        sb.table("target_groups").upsert(rows, on_conflict="user_id,fb_group_id").execute()
+        # Fetch all target groups (both active and inactive) for this user to avoid conflicts
+        existing = (
+            sb.table("target_groups")
+            .select("id, fb_group_id, is_active")
+            .eq("user_id", req.user_id)
+            .execute()
+        )
+        existing_map = {r["fb_group_id"]: r for r in (existing.data or []) if r.get("fb_group_id")}
+
+        inserts = []
+        for g in groups:
+            gid = g["id"]
+            if gid in existing_map:
+                row = existing_map[gid]
+                # If it exists, reactivate and update it
+                sb.table("target_groups").update({
+                    "is_active": True,
+                    "session_id": req.session_id,
+                    "name": g["name"],
+                    "url": g["url"],
+                    "last_checked_at": _now()
+                }).eq("id", row["id"]).execute()
+            else:
+                inserts.append({
+                    "user_id": req.user_id,
+                    "session_id": req.session_id,
+                    "name": g["name"],
+                    "url": g["url"],
+                    "fb_group_id": gid,
+                    "is_member": True,
+                    "validation_status": "valid",
+                    "is_active": True,
+                    "last_checked_at": _now()
+                })
+        
+        if inserts:
+            sb.table("target_groups").insert(inserts).execute()
 
     return {"success": True, "groups": groups, "count": len(groups)}
 
@@ -378,7 +400,14 @@ async def validate_group(req: ValidateGroupRequest):
     if not res.get("success"):
         # Persist as invalid so the UI shows a red alert.
         if req.persist:
-            sb.table("target_groups").upsert({
+            existing = (
+                sb.table("target_groups")
+                .select("id")
+                .eq("user_id", req.user_id)
+                .eq("fb_group_id", gid)
+                .execute()
+            )
+            data = {
                 "user_id": req.user_id,
                 "session_id": req.session_id,
                 "name": req.name or gid,
@@ -386,8 +415,13 @@ async def validate_group(req: ValidateGroupRequest):
                 "fb_group_id": gid,
                 "validation_status": "invalid",
                 "validation_error": res.get("error"),
+                "is_active": True,
                 "last_checked_at": _now(),
-            }, on_conflict="user_id,fb_group_id").execute()
+            }
+            if existing.data:
+                sb.table("target_groups").update(data).eq("id", existing.data[0]["id"]).execute()
+            else:
+                sb.table("target_groups").insert(data).execute()
         return {"success": False, "error": res.get("error"), "validation": res}
 
     valid = res.get("exists") and res.get("can_post")
@@ -404,9 +438,20 @@ async def validate_group(req: ValidateGroupRequest):
         "member_count": res.get("member_count"),
         "validation_status": "valid" if valid else "invalid",
         "validation_error": None if valid else "Not a member or cannot post in this group.",
+        "is_active": True,
         "last_checked_at": _now(),
     }
     if req.persist:
-        sb.table("target_groups").upsert(payload, on_conflict="user_id,fb_group_id").execute()
+        existing = (
+            sb.table("target_groups")
+            .select("id")
+            .eq("user_id", req.user_id)
+            .eq("fb_group_id", gid)
+            .execute()
+        )
+        if existing.data:
+            sb.table("target_groups").update(payload).eq("id", existing.data[0]["id"]).execute()
+        else:
+            sb.table("target_groups").insert(payload).execute()
 
     return {"success": True, "validation": res, "saved": payload}
