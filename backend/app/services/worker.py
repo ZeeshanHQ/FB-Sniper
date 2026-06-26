@@ -756,15 +756,17 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
                     content, metadata.get("media_url"),
                 )
                 post_targets.extend(api_results)
+            if not post_targets:
+                raise RuntimeError("Failed to post to any of the target groups/pages.")
+
             post_ids = [t["post_id"] for t in post_targets]
             result_detail = (
                 f"Posted to {len(post_ids)} target(s). "
                 f"Post ID(s): {', '.join(post_ids)}"
             )
-            if post_targets:
-                await _execute_paired_comments(
-                    sb, meta_api, token, campaign_id, user_id, post_targets
-                )
+            await _execute_paired_comments(
+                sb, meta_api, token, campaign_id, user_id, post_targets
+            )
 
         elif action_type == "Like posts":
             liked = await _execute_like(meta_api, token, target_groups, target_page_ids)

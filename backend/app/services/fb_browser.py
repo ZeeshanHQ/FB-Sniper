@@ -212,10 +212,13 @@ async def _human_scroll(page: Page, times: int = 3) -> None:
             await _human_mouse_wiggle(page)
 
 
-async def _human_hover_around(page: Page, selector: str) -> None:
+async def _human_hover_around(page: Page, selector_or_locator) -> None:
     """Hover around an element before clicking, like a human scanning."""
     try:
-        elem = page.locator(selector).first
+        if isinstance(selector_or_locator, str):
+            elem = page.locator(selector_or_locator).first
+        else:
+            elem = selector_or_locator
         box = await elem.bounding_box()
         if not box:
             return
@@ -417,11 +420,11 @@ async def fetch_joined_groups(
             managed_groups = await page.evaluate("""
             () => {
                 const sidebar = document.querySelector('div[role="navigation"]') || document.body;
-                // Exclude 'div' tags to prevent parent wrapper containers from matching keywords and breaking the sequence
-                const elements = Array.from(sidebar.querySelectorAll('span, h1, h2, h3, a'));
-                let inManagedSection = false;
-                const managedGroups = {};
+                const allElements = Array.from(sidebar.querySelectorAll('span, h1, h2, h3, a'));
                 
+                // Normalizes text to lowercase and replaces curly quotes with standard ones
+                const norm = (str) => (str || '').trim().toLowerCase().replace(/[\\u2018\\u2019’']/g, "'");
+
                 const managedKeywords = [
                     "groups you manage", "groups you run", "groups you admin", "managed groups",
                     "grupos que administras", "grupos que diriges", "meine gruppen", "groupes que vous gérez",
@@ -432,36 +435,56 @@ async def fetch_joined_groups(
                     "grupos a los que te has unido", "grupos unidos", "populäre gruppen", "groupes que vous avez rejoints",
                     "see all"
                 ];
-                
-                for (const el of elements) {
+
+                // 1. Find deepest header containing "Groups you manage"
+                const manageCandidates = allElements.filter(el => {
                     const tag = el.tagName.toUpperCase();
-                    const text = (el.textContent || '').trim();
-                    const lowerText = text.toLowerCase();
+                    if (tag === 'A') return false;
+                    const val = norm(el.textContent);
+                    return managedKeywords.includes(val);
+                });
+                const header = manageCandidates.find(el => {
+                    return !Array.from(el.querySelectorAll('*')).some(child => manageCandidates.includes(child));
+                });
+
+                if (!header) return []; // Header not found
+
+                // 2. Find deepest exit header containing "Groups you've joined"
+                const exitCandidates = allElements.filter(el => {
+                    const tag = el.tagName.toUpperCase();
+                    if (tag === 'A') return false;
+                    const val = norm(el.textContent);
+                    return exitKeywords.includes(val);
+                });
+                const exitHeader = exitCandidates.find(el => {
+                    return !Array.from(el.querySelectorAll('*')).some(child => exitCandidates.includes(child));
+                });
+
+                // 3. Extract all links pointing to groups that appear between header and exitHeader in DOM order
+                const managedGroups = {};
+                for (const el of allElements) {
+                    if (el.tagName.toUpperCase() !== 'A') continue;
                     
-                    if (tag !== 'A') {
-                        if (managedKeywords.includes(lowerText)) {
-                            inManagedSection = true;
-                            continue;
-                        }
-                        if (inManagedSection && exitKeywords.includes(lowerText)) {
-                            inManagedSection = false;
-                            break;
-                        }
-                    } else {
-                        if (inManagedSection) {
-                            const href = el.getAttribute('href') || el.href || '';
-                            const match = href.match(/\/groups\/([^/?#]+)/);
-                            if (match) {
-                                const gid = match[1];
-                                if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
-                                    const cleanName = text.split('\\n')[0].trim();
-                                    if (cleanName && cleanName.length > 1 && !managedGroups[gid]) {
-                                        managedGroups[gid] = {
-                                            id: gid,
-                                            name: cleanName.substring(0, 120),
-                                            url: `https://www.facebook.com/groups/${gid}/`
-                                        };
-                                    }
+                    // Must be after header
+                    const isAfterHeader = (header.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+                    // Must be before exitHeader (if exitHeader exists)
+                    const isBeforeExit = !exitHeader || ((el.compareDocumentPosition(exitHeader) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+
+                    if (isAfterHeader && isBeforeExit) {
+                        const href = el.getAttribute('href') || el.href || '';
+                        const match = href.match(/\/groups\/([^/?#]+)/);
+                        if (match) {
+                            const gid = match[1];
+                            if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
+                                // innerText preserves block/newline layout so we can split and get the clean name
+                                const text = (el.innerText || el.textContent || '').trim();
+                                const cleanName = text.split('\\n')[0].trim();
+                                if (cleanName && cleanName.length > 1 && !managedGroups[gid]) {
+                                    managedGroups[gid] = {
+                                        id: gid,
+                                        name: cleanName.substring(0, 120),
+                                        url: "https://www.facebook.com/groups/" + gid + "/"
+                                    };
                                 }
                             }
                         }
@@ -647,13 +670,22 @@ async def post_to_group(
             # Open composer with human-like interaction
             opened = False
             for sel in SELECTORS["group_composer_trigger"]:
-                loc = page.locator(sel).first
-                if await loc.count():
-                    # Hover around before clicking
-                    await _human_hover_around(page, sel)
-                    await _sleep(0.2, 0.6)
-                    await loc.click()
-                    opened = True
+                loc = page.locator(sel)
+                try:
+                    await loc.first.wait_for(state="attached", timeout=5000)
+                except Exception:
+                    continue
+                
+                count = await loc.count()
+                for i in range(count):
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        await _human_hover_around(page, el)
+                        await _sleep(0.2, 0.6)
+                        await el.click()
+                        opened = True
+                        break
+                if opened:
                     break
             if not opened:
                 return {"success": False, "error": "Composer not found (not a member or DOM changed)."}
@@ -665,11 +697,26 @@ async def post_to_group(
                 await _human_scroll(page, times=1)
                 await _sleep(0.5, 1.2)
             
-            textbox = page.locator(SELECTORS["composer_textbox"]).first
-            await textbox.wait_for(state="visible", timeout=15000)
+            # Find the visible composer textbox
+            textbox = None
+            loc = page.locator(SELECTORS["composer_textbox"])
+            try:
+                await loc.first.wait_for(state="attached", timeout=15000)
+            except Exception:
+                return {"success": False, "error": "Composer textbox not found."}
+            
+            count = await loc.count()
+            for i in range(count):
+                el = loc.nth(i)
+                if await el.is_visible():
+                    textbox = el
+                    break
+            
+            if not textbox:
+                return {"success": False, "error": "Composer textbox is not visible."}
             
             # Click near textbox then focus properly
-            await _human_hover_around(page, SELECTORS["composer_textbox"])
+            await _human_hover_around(page, textbox)
             await textbox.click()
             await _sleep(0.3, 0.7)
             
@@ -701,12 +748,22 @@ async def post_to_group(
             # Submit with hover behavior
             posted = False
             for sel in SELECTORS["post_button"]:
-                btn = page.locator(sel).first
-                if await btn.count():
-                    await _human_hover_around(page, sel)
-                    await _sleep(0.3, 0.8)
-                    await btn.click()
-                    posted = True
+                loc = page.locator(sel)
+                try:
+                    await loc.first.wait_for(state="attached", timeout=5000)
+                except Exception:
+                    continue
+                
+                count = await loc.count()
+                for i in range(count):
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        await _human_hover_around(page, el)
+                        await _sleep(0.3, 0.8)
+                        await el.click()
+                        posted = True
+                        break
+                if posted:
                     break
             if not posted:
                 return {"success": False, "error": "Post button not found."}
