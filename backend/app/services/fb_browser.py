@@ -393,13 +393,93 @@ async def fetch_joined_groups(
     max_scroll: int = 8,
     headless: bool = True,
 ) -> Dict[str, Any]:
-    """Scrape the account's joined groups, then filter to keep ONLY groups where the user has posting access."""
+    """Scrape 'Groups you manage' from groups home sidebar. Fallback to joined groups validation if none found."""
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
         page = await context.new_page()
         await _apply_stealth(page)
         try:
+            # 1. Try to fetch groups you manage from the main Groups page sidebar
+            logger.info("[fb_browser] Navigating to https://www.facebook.com/groups/ to look for managed groups...")
+            await page.goto("https://www.facebook.com/groups/", wait_until="domcontentloaded")
+            await _sleep(3.0, 5.0)
+
+            # Scroll the sidebar slightly to trigger React lazy-loading of items if needed
+            try:
+                sidebar = page.locator('div[role="navigation"]').first
+                if await sidebar.count():
+                    await sidebar.evaluate("el => el.scrollTop = 500")
+                    await _sleep(1.0, 2.0)
+            except Exception:
+                pass
+
+            managed_groups = await page.evaluate("""
+            () => {
+                const sidebar = document.querySelector('div[role="navigation"]') || document.body;
+                const elements = Array.from(sidebar.querySelectorAll('span, div, h1, h2, h3, a[href*="/groups/"]'));
+                let inManagedSection = false;
+                const managedGroups = {};
+                
+                const managedKeywords = [
+                    "groups you manage", "groups you run", "groups you admin", "managed groups",
+                    "grupos que administras", "grupos que diriges", "meine gruppen", "groupes que vous gérez",
+                    "your groups"
+                ];
+                const exitKeywords = [
+                    "groups you've joined", "joined groups", "groups you joined", "discover", "suggested groups",
+                    "grupos a los que te has unido", "grupos unidos", "populäre gruppen", "groupes que vous avez rejoints",
+                    "see all"
+                ];
+                
+                for (const el of elements) {
+                    const tag = el.tagName;
+                    const text = (el.textContent || '').trim();
+                    const lowerText = text.toLowerCase();
+                    
+                    if (tag !== 'A') {
+                        if (managedKeywords.some(kw => lowerText === kw || (lowerText.startsWith(kw) && lowerText.length < 40))) {
+                            inManagedSection = true;
+                            continue;
+                        }
+                        if (inManagedSection && exitKeywords.some(kw => lowerText === kw || (lowerText.startsWith(kw) && lowerText.length < 40))) {
+                            // If it's a see all link, don't exit
+                            if (lowerText === 'see all' && el.closest('a')) {
+                                continue;
+                            }
+                            inManagedSection = false;
+                            break;
+                        }
+                    } else {
+                        if (inManagedSection) {
+                            const href = el.href || '';
+                            const match = href.match(/\/groups\/([^/?#]+)/);
+                            if (match) {
+                                const gid = match[1];
+                                if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
+                                    const cleanName = text.split('\\n')[0].trim();
+                                    if (cleanName && cleanName.length > 1 && !managedGroups[gid]) {
+                                        managedGroups[gid] = {
+                                            id: gid,
+                                            name: cleanName.substring(0, 120),
+                                            url: `https://www.facebook.com/groups/${gid}/`
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return Object.values(managedGroups);
+            }
+            """)
+
+            if managed_groups:
+                logger.info(f"[fb_browser] Found {len(managed_groups)} managed groups via groups home sidebar.")
+                return {"success": True, "groups": managed_groups}
+
+            # 2. Fallback: Scrape all joined groups and validate posting permissions (old behavior)
+            logger.info("[fb_browser] No managed groups found in sidebar. Falling back to all joined groups list validation.")
             await page.goto(FB_GROUPS_JOINED, wait_until="domcontentloaded")
             await _sleep(2.0, 4.0)
             await _human_scroll(page, times=max_scroll)
@@ -429,8 +509,6 @@ async def fetch_joined_groups(
             # Close the main page to free up resources
             await page.close()
 
-            # Validate each group to ensure the user has posting access (can_post = True).
-            # To avoid rate limits and massive CPU spikes, we process them in chunks/semi-parallel.
             validated_groups = []
             
             async def validate_one(g_info):
