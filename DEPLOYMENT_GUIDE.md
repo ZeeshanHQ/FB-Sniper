@@ -79,7 +79,7 @@ You must deploy both separately.
      - type: web
        name: fb-sniper-backend
        env: python
-       buildCommand: pip install -r requirements.txt
+       buildCommand: pip install -r requirements.txt && playwright install chromium
        startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
        envVars:
          - key: SUPABASE_URL
@@ -106,7 +106,7 @@ You must deploy both separately.
    - Connect your GitHub repository
    - Select the `backend` folder as root (if monorepo)
    - Runtime: Python 3
-   - Build Command: `pip install -r requirements.txt`
+   - Build Command: `pip install -r requirements.txt && playwright install chromium`
    - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
 5. **Configure Environment Variables in Render**

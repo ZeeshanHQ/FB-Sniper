@@ -336,6 +336,15 @@ async def _get_page_token(meta_api, user_token: str, page_id: str) -> Optional[s
 
 # ── Playwright group posting ─────────────────────────────────────────────────
 
+# Global lock registry to serialize actions sharing the same session
+_SESSION_LOCKS: Dict[str, asyncio.Lock] = {}
+
+def _get_session_lock(session_id: str) -> asyncio.Lock:
+    if session_id not in _SESSION_LOCKS:
+        _SESSION_LOCKS[session_id] = asyncio.Lock()
+    return _SESSION_LOCKS[session_id]
+
+
 async def _playwright_post_to_groups(
     sb: Client,
     user_id: str,
@@ -391,55 +400,58 @@ async def _playwright_post_to_groups(
             sessions_needed.setdefault(sid, []).append(g)
 
         for session_id, groups in sessions_needed.items():
-            # Load + decrypt session
-            s_res = await _db(lambda: (
-                sb.table("fb_sessions")
-                .select("storage_state, user_agent, proxy, status")
-                .eq("id", session_id)
-                .eq("user_id", user_id)
-                .limit(1)
-                .execute()
-            ))
-            rows = s_res.data or []
-            if not rows:
-                logger.warning(f"[Worker] Session {session_id} not found — skipping groups.")
-                continue
-            srow = rows[0]
-            if srow.get("status") in ("expired", "invalid"):
-                logger.warning(f"[Worker] Session {session_id} is {srow['status']} — skipping groups.")
-                continue
-            try:
-                state = decrypt_state(srow["storage_state"])
-            except Exception as exc:
-                logger.error(f"[Worker] Cannot decrypt session {session_id}: {exc}")
-                continue
-
-            cfg = SessionConfig(
-                user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
-                proxy=srow.get("proxy"),
-            )
-
-            for g in groups:
-                group_url = g.get("url", "")
-                if not group_url:
-                    logger.warning(f"[Worker] Group '{g.get('name')}' has no URL — skipping.")
+            # Acquire the lock for this session before operating on it
+            lock = _get_session_lock(session_id)
+            async with lock:
+                # Load + decrypt session
+                s_res = await _db(lambda: (
+                    sb.table("fb_sessions")
+                    .select("storage_state, user_agent, proxy, status")
+                    .eq("id", session_id)
+                    .eq("user_id", user_id)
+                    .limit(1)
+                    .execute()
+                ))
+                rows = s_res.data or []
+                if not rows:
+                    logger.warning(f"[Worker] Session {session_id} not found — skipping groups.")
                     continue
-                result = await post_to_group(
-                    group_url=group_url,
-                    content=content,
-                    storage_state=state,
-                    image_path=temp_img_path,
-                    cfg=cfg,
-                    headless=headless,
+                srow = rows[0]
+                if srow.get("status") in ("expired", "invalid"):
+                    logger.warning(f"[Worker] Session {session_id} is {srow['status']} — skipping groups.")
+                    continue
+                try:
+                    state = decrypt_state(srow["storage_state"])
+                except Exception as exc:
+                    logger.error(f"[Worker] Cannot decrypt session {session_id}: {exc}")
+                    continue
+
+                cfg = SessionConfig(
+                    user_agent=srow.get("user_agent") or DEFAULT_USER_AGENT,
+                    proxy=srow.get("proxy"),
                 )
-                if result.get("success"):
-                    label = "(pending approval)" if result.get("pending_approval") else "(posted)"
-                    created.append({"post_id": group_url, "page_id": None})
-                    logger.info(f"[Worker] Playwright posted to '{g.get('name')}' {label}")
-                else:
-                    logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {result.get('error')}")
-                # Human-paced inter-group delay
-                await asyncio.sleep(random.uniform(8, 18))
+
+                for g in groups:
+                    group_url = g.get("url", "")
+                    if not group_url:
+                        logger.warning(f"[Worker] Group '{g.get('name')}' has no URL — skipping.")
+                        continue
+                    result = await post_to_group(
+                        group_url=group_url,
+                        content=content,
+                        storage_state=state,
+                        image_path=temp_img_path,
+                        cfg=cfg,
+                        headless=headless,
+                    )
+                    if result.get("success"):
+                        label = "(pending approval)" if result.get("pending_approval") else "(posted)"
+                        created.append({"post_id": group_url, "page_id": None})
+                        logger.info(f"[Worker] Playwright posted to '{g.get('name')}' {label}")
+                    else:
+                        logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {result.get('error')}")
+                    # Human-paced inter-group delay
+                    await asyncio.sleep(random.uniform(8, 18))
     finally:
         if temp_img_path and os.path.exists(temp_img_path):
             try:

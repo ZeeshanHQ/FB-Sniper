@@ -495,7 +495,9 @@ async def fetch_joined_groups(
                             const gid = match[1];
                             if (!['feed', 'discover', 'joins', 'create', 'search', 'category'].includes(gid)) {
                                 const firstSpan = el.querySelector('span');
-                                let nameText = firstSpan ? (firstSpan.innerText || firstSpan.textContent || '').trim() : (el.innerText || el.textContent || '').trim().split('\\n')[0].trim();
+                                let nameText = firstSpan ? (firstSpan.innerText || firstSpan.textContent || '').trim() : (el.innerText || el.textContent || '').trim().split('\n')[0].trim();
+                                // Replace all spaces (including non-breaking spaces like \u00A0) with standard spaces
+                                nameText = nameText.replace(/\s+/g, ' ');
                                 // Clean up trailing activity indicators
                                 nameText = nameText.replace(/(?:last active|active|about|hour|hours|minute|minutes|just now|yesterday|días|horas|minutos|activa).*/i, '').trim();
                                 
@@ -681,12 +683,29 @@ async def post_to_group(
                     photo_loc = page.locator(f'div[role="dialog"] {SELECTORS["photo_input"]}')
                     if not await photo_loc.count():
                         photo_loc = page.locator(SELECTORS["photo_input"])
+                    
+                    # If no file input is found, click the Photo/video button in dialog to reveal it
+                    if not await photo_loc.count():
+                        logger.info("Hidden file input not found, searching for Photo/video button to click first")
+                        trigger_btn = page.locator('div[role="dialog"] div[role="button"]:has-text("Photo/video")')
+                        if not await trigger_btn.count():
+                            trigger_btn = page.locator('div[role="dialog"] [aria-label*="Photo/video"]')
+                        if await trigger_btn.count() and await trigger_btn.first.is_visible():
+                            await _human_hover_around(page, trigger_btn.first)
+                            await trigger_btn.first.click()
+                            await _sleep(1.0, 2.5)
+                        
+                        # Re-locate photo input
+                        photo_loc = page.locator(f'div[role="dialog"] {SELECTORS["photo_input"]}')
+                        if not await photo_loc.count():
+                            photo_loc = page.locator(SELECTORS["photo_input"])
+
                     await _human_hover_around(page, photo_loc)
                     file_input = photo_loc.first
                     await file_input.set_input_files(image_path)
                     
                     # Wait for upload with human-like impatience checks
-                    for _ in range(random.randint(3, 7)):
+                    for _ in range(random.randint(4, 8)):
                         await _sleep(0.5, 1.0)
                         # Move mouse slightly while waiting
                         await _human_mouse_wiggle(page)
@@ -711,6 +730,14 @@ async def post_to_group(
                 if await el.is_visible():
                     text = (await el.inner_text() or "").strip().lower()
                     if text in ["post", "publicar", "posten", "publier", "share", "partager", "pubblica"]:
+                        # Check if post button is disabled (e.g. uploading) and wait for it to become enabled
+                        for _ in range(15):
+                            disabled = await el.get_attribute("aria-disabled")
+                            if disabled == "true":
+                                logger.info("Post button is disabled (possibly uploading), waiting...")
+                                await _sleep(1.0, 2.0)
+                            else:
+                                break
                         await _human_hover_around(page, el)
                         await _sleep(0.3, 0.8)
                         await el.click()
@@ -736,6 +763,13 @@ async def post_to_group(
                             label = (await el.get_attribute("aria-label") or "").lower()
                             if "anonymous" in label:
                                 continue
+                            for _ in range(15):
+                                disabled = await el.get_attribute("aria-disabled")
+                                if disabled == "true":
+                                    logger.info("Fallback post button is disabled, waiting...")
+                                    await _sleep(1.0, 2.0)
+                                else:
+                                    break
                             await _human_hover_around(page, el)
                             await _sleep(0.3, 0.8)
                             await el.click()
