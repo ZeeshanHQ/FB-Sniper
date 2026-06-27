@@ -1982,13 +1982,26 @@ export default function DashboardPage() {
                     <div style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
                     <span style={{ fontSize: "0.6875rem", fontWeight: 600, color }}>{statusLabel[c.status] ?? c.status}</span>
                   </div>
-                  <button
-                    onClick={async () => {
-                      await supabase.from("automation_posts").delete().eq("id", c.id).then(null, () => {});
-                      setCampaigns(prev => prev.filter((x: any) => x.id !== c.id));
-                    }}
-                    style={{ width: "28px", height: "28px", borderRadius: "0.375rem", border: "1px solid #fecaca", backgroundColor: "#fef2f2", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                  ><Trash2 size={12} color="#ef4444" strokeWidth={2.5} /></button>
+                  {c.status !== "running" ? (
+                    <button
+                      onClick={async () => {
+                        if (!user?.id) return;
+                        await supabase.from("automation_posts").delete().eq("id", c.id).then(null, () => {});
+                        // Full refresh to keep lists sync'd and deduplicated
+                        const { data: allCamps } = await supabase.from("automation_posts")
+                          .select("id, content, target_groups, target_pages, status, scheduled_at, metadata, created_at")
+                          .eq("user_id", user.id)
+                          .order("created_at", { ascending: false });
+                        if (allCamps) {
+                          const seen = new Set<string>();
+                          setCampaigns(allCamps.filter((c: any) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; }));
+                        }
+                      }}
+                      style={{ width: "28px", height: "28px", borderRadius: "0.375rem", border: "1px solid #fecaca", backgroundColor: "#fef2f2", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                    ><Trash2 size={12} color="#ef4444" strokeWidth={2.5} /></button>
+                  ) : (
+                    <div style={{ width: "28px", height: "28px" }} />
+                  )}
                 </div>
               );
             })
@@ -2488,13 +2501,26 @@ export default function DashboardPage() {
                       <span style={{ fontSize: "0.6875rem", fontWeight: 600, color }}>{statusLabel[c.status] ?? c.status}</span>
                     </div>
                     <span style={{ fontSize: "0.75rem", color: "var(--text-2)" }}>{scheduled}</span>
-                    <button
-                      onClick={async () => {
+                    {c.status !== "running" ? (
+                      <button
+                        onClick={async () => {
+                        if (!user?.id) return;
                         await supabase.from("automation_posts").delete().eq("id", c.id).then(null, () => {});
-                        setCampaigns(prev => prev.filter((x: any) => x.id !== c.id));
+                        // Full refresh to keep lists sync'd and deduplicated
+                        const { data: allCamps } = await supabase.from("automation_posts")
+                          .select("id, content, target_groups, target_pages, status, scheduled_at, metadata, created_at")
+                          .eq("user_id", user.id)
+                          .order("created_at", { ascending: false });
+                        if (allCamps) {
+                          const seen = new Set<string>();
+                          setCampaigns(allCamps.filter((c: any) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; }));
+                        }
                       }}
-                      style={{ width: "28px", height: "28px", borderRadius: "0.375rem", border: "1px solid #fecaca", backgroundColor: "#fef2f2", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                    ><Trash2 size={12} color="#ef4444" strokeWidth={2.5} /></button>
+                        style={{ width: "28px", height: "28px", borderRadius: "0.375rem", border: "1px solid #fecaca", backgroundColor: "#fef2f2", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                      ><Trash2 size={12} color="#ef4444" strokeWidth={2.5} /></button>
+                    ) : (
+                      <div style={{ width: "28px", height: "28px" }} />
+                    )}
                   </div>
                 );
               });

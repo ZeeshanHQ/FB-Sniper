@@ -207,20 +207,13 @@ async def _execute_paired_comments(
     campaign_id: str,
     user_id: str,
     post_targets: List[Dict[str, Optional[str]]],
+    post_content: str,
 ) -> None:
     """
     After a post campaign publishes, fetch all pending paired comments and fire them.
     post_targets = [{"post_id": str, "page_id": Optional[str]}]
     Page posts use their page-specific token; group posts use the user token.
     """
-    camp_res = await _db(lambda: (
-        sb.table("automation_posts")
-        .select("content")
-        .eq("id", campaign_id)
-        .single()
-        .execute()
-    ))
-    post_content = camp_res.data.get("content", "") if camp_res.data else ""
 
     result = await _db(lambda: (
         sb.table("post_scheduled_comments")
@@ -968,7 +961,7 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
                 f"Post ID(s): {', '.join(post_ids)}"
             )
             await _execute_paired_comments(
-                sb, meta_api, token, campaign_id, user_id, post_targets
+                sb, meta_api, token, campaign_id, user_id, post_targets, content
             )
 
         elif action_type == "Like posts":
