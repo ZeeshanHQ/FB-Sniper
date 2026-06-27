@@ -68,7 +68,20 @@ export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser]           = useState<{ id: string; email: string; user_metadata?: { full_name?: string; avatar_url?: string; picture?: string } } | null>(null);
   const [loading, setLoading]     = useState(true);
-  const [activeNav, setActiveNav] = useState("Overview");
+  const [activeNav, setActiveNav] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sniper_active_nav") || "Overview";
+    }
+    return "Overview";
+  });
+  
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sniper_active_nav", activeNav);
+    }
+  }, [activeNav]);
+
+  const [launchingCampaign, setLaunchingCampaign] = useState(false);
   const [collapsed, setCollapsed]           = useState(false);
   const [dropdown, setDropdown]             = useState(false);
   const [theme, setTheme]                   = useState<Theme>("system");
@@ -1339,11 +1352,16 @@ export default function DashboardPage() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
               <div>
                 <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Action Type</label>
-                <select value={campaignType} onChange={(e) => setCampaignType(e.target.value)} style={{ ...inputStyle }}>
-                  <option value="Post to group/page">Post to group/page</option>
-                  <option value="Comment on post">Comment on post</option>
-                  <option value="Like posts">Like posts</option>
-                </select>
+                <div style={{ display: "flex", borderRadius: "0.5rem", border: "1px solid var(--border)", overflow: "hidden", height: "38px" }}>
+                  {(["Post to group/page", "Comment on post", "Like posts"] as const).map(a => (
+                    <button key={a} type="button" onClick={() => setCampaignType(a)}
+                      style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
+                        backgroundColor: campaignType === a ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
+                        color: campaignType === a ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
+                      {a === "Post to group/page" ? "Post to Group/Page" : a === "Comment on post" ? "Comment on Post" : "Like Posts"}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Frequency</label>
@@ -1362,7 +1380,6 @@ export default function DashboardPage() {
                 )}
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ gridColumn: "1 / -1" }}>
                 {/* Segmented control for Target Type */}
                 <div style={{ marginBottom: "1.25rem" }}>
                   <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Target Type</label>
@@ -1372,7 +1389,7 @@ export default function DashboardPage() {
                         style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
                           backgroundColor: sniperTargetType === t ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
                           color: sniperTargetType === t ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
-                        {t === "group" ? "Facebook Groups (Cookies)" : "Facebook Pages (API)"}
+                        {t === "group" ? "Facebook Groups" : "Facebook Pages"}
                       </button>
                     ))}
                   </div>
@@ -1487,7 +1504,6 @@ export default function DashboardPage() {
                     )}
                   </>
                 )}
-              </div>
               </div>
             </div>
             {/* ── Post action ── */}
@@ -1738,74 +1754,97 @@ export default function DashboardPage() {
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
               <button onClick={() => setShowSniperForm(false)} style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-2)", fontSize: "0.8125rem", fontWeight: 500, cursor: "pointer" }}>Cancel</button>
               <button
+                disabled={launchingCampaign}
                 onClick={async () => {
-                  if (!user?.id) return;
+                  if (!user?.id || launchingCampaign) return;
                   if (selectedTargets.length === 0) { setLaunchError("Select at least one Page or Group before launching."); return; }
                   setLaunchError("");
-                  let scheduledAt: string | null = null;
-                  if (scheduleDate) {
-                    const d = new Date(scheduleDate);
-                    let h = parseInt(scheduleHour, 10);
-                    if (scheduleAmPm === "PM" && h !== 12) h += 12;
-                    if (scheduleAmPm === "AM" && h === 12) h = 0;
-                    d.setHours(h, parseInt(scheduleMinute, 10), 0, 0);
-                    scheduledAt = d.toISOString();
-                  }
-                  const targetGroupIds = sniperTargetType === "group" 
-                    ? groups.filter(g => g.session_id === selectedFbSessionId && selectedTargets.includes(g.id)).map(g => g.id)
-                    : [];
-                  const targetPageIds  = sniperTargetType === "page"
-                    ? fbPages.filter((p: any) => selectedTargets.includes(p.id)).map((p: any) => p.id)
-                    : [];
+                  setLaunchingCampaign(true);
+                  try {
+                    let scheduledAt: string | null = null;
+                    if (scheduleDate) {
+                      const d = new Date(scheduleDate);
+                      let h = parseInt(scheduleHour, 10);
+                      if (scheduleAmPm === "PM" && h !== 12) h += 12;
+                      if (scheduleAmPm === "AM" && h === 12) h = 0;
+                      d.setHours(h, parseInt(scheduleMinute, 10), 0, 0);
+                      scheduledAt = d.toISOString();
+                    }
+                    const targetGroupIds = sniperTargetType === "group" 
+                      ? groups.filter(g => g.session_id === selectedFbSessionId && selectedTargets.includes(g.id)).map(g => g.id)
+                      : [];
+                    const targetPageIds  = sniperTargetType === "page"
+                      ? fbPages.filter((p: any) => selectedTargets.includes(p.id)).map((p: any) => p.id)
+                      : [];
 
-                  if (campaignType === "Post to group/page") {
-                    // Use backend endpoint — creates post + optional paired comment atomically
-                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-                    const res = await fetch(`${apiUrl}/api/sniper/schedule-post`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        user_id:              user.id,
-                        content:              postContent,
-                        target_groups:        targetGroupIds,
-                        target_pages:         targetPageIds,
-                        scheduled_at:         scheduledAt,
-                        frequency,
-                        media_url:            uploadedUrl ?? null,
-                        comment:              firstComment.trim() || null,
-                        comment_delay_minutes: firstComment.trim()
-                          ? (commentDelayMode === "Now" ? 0 : commentDelayMode === "15m" ? 15 : commentDelayMode === "30m" ? 30 : commentDelayMode === "1hr" ? 60 : parseInt(commentDelayCustom, 10) || 0)
-                          : 0,
-                      }),
-                    });
-                    const json = await res.json();
-                    if (!res.ok) { setLaunchError(json.detail || "Failed to launch campaign."); return; }
-                    // Refresh campaign list from DB so we get the full row
-                    const { data: newCamp } = await supabase.from("automation_posts").select("*").eq("id", json.post_id).single();
-                    if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
-                  } else {
-                    // Comment-trigger and Like campaigns go direct to Supabase (no paired comment needed)
-                    const { data: newCamp } = await supabase.from("automation_posts").insert({
-                      user_id:       user.id,
-                      content:       postContent,
-                      target_groups: targetGroupIds,
-                      target_pages:  targetPageIds,
-                      status:        scheduledAt ? "scheduled" : "pending",
-                      scheduled_at:  scheduledAt,
-                      metadata:      { action_type: campaignType, frequency, media_url: uploadedUrl ?? null, trigger_keywords: triggerKeywords || null, auto_reply: autoReply || null },
-                    }).select().single();
-                    if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
-                  }
+                    if (campaignType === "Post to group/page") {
+                      // Use backend endpoint — creates post + optional paired comment atomically
+                      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                      const res = await fetch(`${apiUrl}/api/sniper/schedule-post`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          user_id:              user.id,
+                          content:              postContent,
+                          target_groups:        targetGroupIds,
+                          target_pages:         targetPageIds,
+                          scheduled_at:         scheduledAt,
+                          frequency,
+                          media_url:            uploadedUrl ?? null,
+                          comment:              firstComment.trim() || null,
+                          comment_delay_minutes: firstComment.trim()
+                            ? (commentDelayMode === "Now" ? 0 : commentDelayMode === "15m" ? 15 : commentDelayMode === "30m" ? 30 : commentDelayMode === "1hr" ? 60 : parseInt(commentDelayCustom, 10) || 0)
+                            : 0,
+                        }),
+                      });
+                      const json = await res.json();
+                      if (!res.ok) { setLaunchError(json.detail || "Failed to launch campaign."); return; }
+                      // Refresh campaign list from DB so we get the full row
+                      const { data: newCamp } = await supabase.from("automation_posts").select("*").eq("id", json.post_id).single();
+                      if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
+                    } else {
+                      // Comment-trigger and Like campaigns go direct to Supabase (no paired comment needed)
+                      const { data: newCamp } = await supabase.from("automation_posts").insert({
+                        user_id:       user.id,
+                        content:       postContent,
+                        target_groups: targetGroupIds,
+                        target_pages:  targetPageIds,
+                        status:        scheduledAt ? "scheduled" : "pending",
+                        scheduled_at:  scheduledAt,
+                        metadata:      { action_type: campaignType, frequency, media_url: uploadedUrl ?? null, trigger_keywords: triggerKeywords || null, auto_reply: autoReply || null },
+                      }).select().single();
+                      if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
+                    }
 
-                  const newCount = campaignCount + 1;
-                  setCampaignCount(newCount);
-                  try { localStorage.setItem(`sniper_campaigns_${user.id}`, String(newCount)); } catch {}
-                  logActivity("Launched Campaign", campaignType, "pending");
-                  setPostContent(""); setMediaFile(null); setUploadedUrl(null); setUploadProgress(0); setSelectedTargets([]); setScheduleDate(null); setFrequency("once"); setTriggerKeywords(""); setAutoReply(""); setFirstComment(""); setCommentDelayMode("Now"); setCommentDelayCustom("15"); setLaunchError("");
-                  setShowSniperForm(false);
+                    const newCount = campaignCount + 1;
+                    setCampaignCount(newCount);
+                    try { localStorage.setItem(`sniper_campaigns_${user.id}`, String(newCount)); } catch {}
+                    logActivity("Launched Campaign", campaignType, "pending");
+                    setPostContent(""); setMediaFile(null); setUploadedUrl(null); setUploadProgress(0); setSelectedTargets([]); setScheduleDate(null); setFrequency("once"); setTriggerKeywords(""); setAutoReply(""); setFirstComment(""); setCommentDelayMode("Now"); setCommentDelayCustom("15"); setLaunchError("");
+                    setShowSniperForm(false);
+                  } catch (err: any) {
+                    setLaunchError(err.message || "Failed to launch campaign.");
+                  } finally {
+                    setLaunchingCampaign(false);
+                  }
                 }}
-                style={{ ...btnPrimary }}
-              ><Send size={13} strokeWidth={2.5} />Launch Campaign</button>
+                style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: "0.5rem", opacity: launchingCampaign ? 0.75 : 1, cursor: launchingCampaign ? "not-allowed" : "pointer" }}
+              >
+                {launchingCampaign ? (
+                  <>
+                    <svg className="animate-spin" style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ opacity: 0.25 }}></circle>
+                      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Launching…
+                  </>
+                ) : (
+                  <>
+                    <Send size={13} strokeWidth={2.5} />
+                    Launch Campaign
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}
