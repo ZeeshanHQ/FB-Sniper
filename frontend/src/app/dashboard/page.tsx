@@ -114,6 +114,7 @@ export default function DashboardPage() {
   const [sessionConnectError, setSessionConnectError] = useState<string|null>(null);
   const [sniperTargetType, setSniperTargetType] = useState<"group" | "page">("group");
   const [campaignsTodayCount, setCampaignsTodayCount] = useState(0);
+  const [userCampaignLimit, setUserCampaignLimit] = useState(5);
   const [selectedFbSessionId, setSelectedFbSessionId] = useState<string | null>(null);
   // ── Add-group form state ──
   const [showAddGroupForm, setShowAddGroupForm] = useState(false);
@@ -507,7 +508,7 @@ export default function DashboardPage() {
       .then(({ data }) => { if (data) setGroups(data); });
   }, [activeNav, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load daily campaign creation count when Sniper nav is active
+  // Load daily campaign creation count and user limits when Sniper nav is active
   useEffect(() => {
     if (activeNav !== "Sniper" || !user?.id) return;
     const checkDailyLimit = async () => {
@@ -519,6 +520,16 @@ export default function DashboardPage() {
           .eq("user_id", user.id)
           .gte("created_at", gteTime);
         setCampaignsTodayCount(count || 0);
+
+        // Fetch user specific daily limit from database
+        const { data: userData } = await supabase
+          .from("users")
+          .select("max_campaigns_per_day")
+          .eq("id", user.id)
+          .single();
+        if (userData && typeof userData.max_campaigns_per_day === "number") {
+          setUserCampaignLimit(userData.max_campaigns_per_day);
+        }
       } catch {}
     };
     checkDailyLimit();
@@ -1352,8 +1363,7 @@ export default function DashboardPage() {
         ? (activeSession?.fb_avatar_url || (activeSession?.fb_account_id ? `https://graph.facebook.com/${activeSession.fb_account_id}/picture?type=large` : null))
         : (fbPages[0]?.picture?.data?.url || null);
 
-      const DAILY_LIMIT = 5;
-      const limitReached = campaignsTodayCount >= DAILY_LIMIT;
+      const limitReached = campaignsTodayCount >= userCampaignLimit;
 
       return (
         <>
@@ -1372,7 +1382,7 @@ export default function DashboardPage() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.25rem" }}>
               <h3 style={{ ...h3, margin: 0 }}>Campaign Setup</h3>
               <span style={{ fontSize: "0.75rem", fontWeight: 600, color: limitReached ? "#ef4444" : "var(--text-3)" }}>
-                Daily Budget: {campaignsTodayCount}/{DAILY_LIMIT} Campaigns
+                Daily Budget: {campaignsTodayCount}/{userCampaignLimit} Campaigns
               </span>
             </div>
 
@@ -1380,7 +1390,7 @@ export default function DashboardPage() {
               <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem 1rem", backgroundColor: resolvedDark ? "rgba(217,119,6,0.12)" : "#fffbeb", borderRadius: "0.5rem", border: "1px solid #fde68a", marginBottom: "1.25rem", alignItems: "center" }}>
                 <AlertTriangle size={16} color="#d97706" strokeWidth={2.5} style={{ flexShrink: 0 }} />
                 <p style={{ margin: 0, fontSize: "0.8125rem", color: resolvedDark ? "#f59e0b" : "#b45309", fontWeight: 600 }}>
-                  Daily campaign budget reached ({campaignsTodayCount}/{DAILY_LIMIT} created in last 24h). Upgrade to our Enterprise tier to bypass limits and automate unlimited posts securely!
+                  Daily campaign budget reached ({campaignsTodayCount}/{userCampaignLimit} created in last 24h). Upgrade to our Enterprise tier to bypass limits and automate unlimited posts securely!
                 </p>
               </div>
             )}

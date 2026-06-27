@@ -423,16 +423,30 @@ async def _scrape_profile_info(page: Page) -> Dict[str, Optional[str]]:
             () => {
                 const isProfilePicUrl = (src) => src && src.includes('fbcdn') && (src.includes('/cpry/') || src.includes('/cpc/') || src.includes('/cprof/') || src.includes('/t39.30808-6/') || src.includes('profile') || src.includes('100x100'));
                 
+                // 1. Try profile picture link element on personal profile page
+                const links = Array.from(document.querySelectorAll('a[href*="/photo/"]'));
+                for (const a of links) {
+                    const img = a.querySelector('img');
+                    if (img && img.src && (a.getBoundingClientRect().width > 100 || isProfilePicUrl(img.src))) {
+                        return img.src;
+                    }
+                }
+
+                // 2. Try the primary profile image via element dimensions and alt text
                 const imgs = Array.from(document.querySelectorAll('img'));
                 const profileImg = imgs.find(img => {
                     const alt = (img.alt || '').toLowerCase();
-                    return (alt.includes('profile picture') || alt.includes('profile photo') || alt.includes('avatar') || alt.includes('photo de profil')) && isProfilePicUrl(img.src);
+                    const rect = img.getBoundingClientRect();
+                    const isRightSize = rect.width >= 120 && rect.width <= 200;
+                    return (alt.includes('profile picture') || alt.includes('profile photo') || alt.includes('avatar')) || (isRightSize && isProfilePicUrl(img.src));
                 });
                 if (profileImg) return profileImg.src;
 
+                // 3. Try to locate the top right profile button avatar
                 const topBarImg = document.querySelector('div[aria-label*="Your profile" i] img, div[aria-label*="Account" i] img, div[role="banner"] img[src*="fbcdn"]');
                 if (topBarImg && topBarImg.src) return topBarImg.src;
 
+                // 4. Fallback search
                 const largeImg = imgs.find(img => img.width >= 100 && img.height >= 100 && isProfilePicUrl(img.src));
                 if (largeImg) return largeImg.src;
 

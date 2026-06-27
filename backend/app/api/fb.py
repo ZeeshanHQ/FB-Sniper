@@ -357,9 +357,8 @@ async def store_session(req: StoreSessionRequest, background_tasks: BackgroundTa
     out = _upsert_session(sb, row)
     session_id = out["id"]
     
-    # Run background validation and group scraping/enrichment if avatar_url is missing
-    if not req.fb_avatar_url or req.fb_account_name == "Facebook Account":
-        background_tasks.add_task(_enrich_session_profile_bg, req.user_id, session_id)
+    # Run background validation and group scraping/enrichment (always run to ensure latest avatar and name are set)
+    background_tasks.add_task(_enrich_session_profile_bg, req.user_id, session_id)
         
     out.pop("storage_state", None)
     return {"success": True, "session": out}

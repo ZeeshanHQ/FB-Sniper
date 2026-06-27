@@ -70,18 +70,18 @@ document.addEventListener('DOMContentLoaded', () => {
         };
       });
 
-      // 2. Fetch user profile page to grab their real name (include credentials to send active session cookies)
+      // 2. Fetch user profile page to grab their real name and profile picture avatar url
       let fbAccountName = 'Facebook Account';
+      let fbAvatarUrl = null;
       try {
         const fbResponse = await fetch('https://www.facebook.com/me/', {
           credentials: 'include'
         });
         if (fbResponse.ok) {
           const html = await fbResponse.text();
-          // Extract Facebook's title tag which usually contains the user's name
+          // Extract Facebook's title tag which contains the user's name
           const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
           if (titleMatch && titleMatch[1]) {
-            // Strip notification counts like (1) or (9+) from the title
             const parsedName = titleMatch[1]
               .replace(/^\(\d+\+?\)\s*/, '')
               .replace(' | Facebook', '')
@@ -90,9 +90,22 @@ document.addEventListener('DOMContentLoaded', () => {
               fbAccountName = parsedName;
             }
           }
+
+          // Extract fbcdn profile pic URL via regex patterns
+          // Matches common CDN structure inside raw HTML scripts/links
+          const cdnPattern = /"https:\/\/scontent[^"]+?fbcdn\.net\/v\/[^"]+?(_n\.jpg|_n\.png|_t\.jpg|100x100)[^"]*?"/gi;
+          const matches = html.match(cdnPattern) || [];
+          for (const match of matches) {
+            const cleanUrl = match.replace(/"/g, '').replace(/\\/g, '');
+            // Prioritize links containing cpry, cpc, cprof, profile, or 100x100
+            if (cleanUrl.includes('/cpry/') || cleanUrl.includes('/cpc/') || cleanUrl.includes('/cprof/') || cleanUrl.includes('/t39.30808-6/') || cleanUrl.includes('profile') || cleanUrl.includes('100x100')) {
+              fbAvatarUrl = cleanUrl;
+              break;
+            }
+          }
         }
       } catch (err) {
-        console.warn('Failed to scrape real name, using fallback.', err);
+        console.warn('Failed to scrape profile info from extension, using fallback.', err);
       }
 
       // 3. Construct storage_state payload
@@ -109,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         fb_account_name: fbAccountName,
         fb_account_id: fbAccountId,
+        fb_avatar_url: fbAvatarUrl,
         user_agent: navigator.userAgent
       };
 
