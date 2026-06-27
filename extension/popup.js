@@ -97,6 +97,13 @@ document.addEventListener('DOMContentLoaded', () => {
           const matches = html.match(cdnPattern) || [];
           for (const match of matches) {
             const cleanUrl = match.replace(/"/g, '').replace(/\\/g, '');
+            
+            // Skip cover photos, group avatars, event photos, etc.
+            const lowerUrl = cleanUrl.toLowerCase();
+            if (lowerUrl.includes('cover') || lowerUrl.includes('/g/') || lowerUrl.includes('groups') || lowerUrl.includes('ad_') || lowerUrl.includes('banner')) {
+              continue;
+            }
+
             // Prioritize links containing cpry, cpc, cprof, profile, or 100x100
             if (cleanUrl.includes('/cpry/') || cleanUrl.includes('/cpc/') || cleanUrl.includes('/cprof/') || cleanUrl.includes('/t39.30808-6/') || cleanUrl.includes('profile') || cleanUrl.includes('100x100')) {
               fbAvatarUrl = cleanUrl;

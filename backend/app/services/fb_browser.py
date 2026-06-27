@@ -416,12 +416,32 @@ async def _scrape_profile_info(page: Page) -> Dict[str, Optional[str]]:
             name = title.split("|")[0].strip()
         elif title:
             name = title.replace(" | Facebook", "").strip()
-            if name.lower() == "facebook":
-                name = None
 
+        # Fallback to scraping display name from profile h1 header if title is generic
+        if not name or name.lower() == "facebook":
+            name = await page.evaluate("""
+                () => {
+                    const h1 = document.querySelector('h1');
+                    if (h1 && h1.textContent && h1.textContent.trim().toLowerCase() !== 'facebook') {
+                        return h1.textContent.trim();
+                    }
+                    const topLabel = document.querySelector('div[role="banner"] a[href*="/me/"] span, div[aria-label*="Your profile" i] span, a[href*="/profile.php"] span');
+                    if (topLabel && topLabel.textContent) return topLabel.textContent.trim();
+                    return null;
+                }
+            """)
+    except Exception as e:
+        logger.warning(f"[fb_browser] Error scraping profile name: {e}")
+
+    try:
         avatar = await page.evaluate("""
             () => {
-                const isProfilePicUrl = (src) => src && src.includes('fbcdn') && (src.includes('/cpry/') || src.includes('/cpc/') || src.includes('/cprof/') || src.includes('/t39.30808-6/') || src.includes('profile') || src.includes('100x100'));
+                const isProfilePicUrl = (src) => {
+                    if (!src || !src.includes('fbcdn')) return false;
+                    const lower = src.toLowerCase();
+                    if (lower.includes('cover') || lower.includes('/g/') || lower.includes('groups') || lower.includes('ad_') || lower.includes('banner')) return false;
+                    return src.includes('/cpry/') || src.includes('/cpc/') || src.includes('/cprof/') || src.includes('/t39.30808-6/') || src.includes('profile') || src.includes('100x100');
+                };
                 
                 // 1. Try profile picture link element on personal profile page
                 const links = Array.from(document.querySelectorAll('a[href*="/photo/"]'));
@@ -444,7 +464,7 @@ async def _scrape_profile_info(page: Page) -> Dict[str, Optional[str]]:
 
                 // 3. Try to locate the top right profile button avatar
                 const topBarImg = document.querySelector('div[aria-label*="Your profile" i] img, div[aria-label*="Account" i] img, div[role="banner"] img[src*="fbcdn"]');
-                if (topBarImg && topBarImg.src) return topBarImg.src;
+                if (topBarImg && topBarImg.src && isProfilePicUrl(topBarImg.src)) return topBarImg.src;
 
                 // 4. Fallback search
                 const largeImg = imgs.find(img => img.width >= 100 && img.height >= 100 && isProfilePicUrl(img.src));
@@ -457,7 +477,7 @@ async def _scrape_profile_info(page: Page) -> Dict[str, Optional[str]]:
             }
         """)
     except Exception as e:
-        logger.warning(f"[fb_browser] Error scraping profile info: {e}")
+        logger.warning(f"[fb_browser] Error scraping profile avatar: {e}")
     
     return {"name": name, "avatar": avatar}
 
@@ -546,6 +566,7 @@ async def validate_session(
             except Exception:
                 pass
 
+            logger.info(f"[fb_browser] Validated session for {info['fb_account_id']}: {name}")
             return {
                 "valid": True,
                 "fb_account_id": info["fb_account_id"],

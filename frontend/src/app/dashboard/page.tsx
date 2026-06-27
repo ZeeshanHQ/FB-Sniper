@@ -1862,6 +1862,21 @@ export default function DashboardPage() {
                       if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
                     }
 
+                    // Increment database counter fields in users table dynamically
+                    try {
+                      const { data: currentUsr } = await supabase.from("users").select("used_campaigns_today, total_used_campaigns").eq("id", user.id).single();
+                      if (currentUsr) {
+                        const newToday = (currentUsr.used_campaigns_today || 0) + 1;
+                        const newTotal = (currentUsr.total_used_campaigns || 0) + 1;
+                        await supabase.from("users").update({
+                          used_campaigns_today: newToday,
+                          total_used_campaigns: newTotal
+                        }).eq("id", user.id);
+                      }
+                    } catch (dbErr) {
+                      console.error("Failed to update database campaign counters:", dbErr);
+                    }
+
                     const newCount = campaignCount + 1;
                     setCampaignCount(newCount);
                     try { localStorage.setItem(`sniper_campaigns_${user.id}`, String(newCount)); } catch {}
