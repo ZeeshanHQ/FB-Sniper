@@ -112,8 +112,8 @@ async def _human_type(page: Page, selector_or_locator, text: str) -> None:
         else selector_or_locator
     )
     
-    # Focus with slight delay
-    await locator.click()
+    # Focus with slight delay (force click to bypass overlay interceptions on complex pages)
+    await locator.click(force=True)
     await _sleep(0.4, 1.1)
     
     # Clear any existing text

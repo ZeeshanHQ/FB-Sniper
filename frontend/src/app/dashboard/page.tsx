@@ -1365,6 +1365,19 @@ export default function DashboardPage() {
 
       const limitReached = campaignsTodayCount >= userCampaignLimit;
 
+      const handleToggleTarget = (targetId: string) => {
+        const isSelected = selectedTargets.includes(targetId);
+        if (isSelected) {
+          setSelectedTargets(selectedTargets.filter(t => t !== targetId));
+        } else {
+          if (selectedTargets.length >= 5) {
+            alert("To protect your account from Facebook restrictions, you can select a maximum of 5 targets per campaign.");
+            return;
+          }
+          setSelectedTargets([...selectedTargets, targetId]);
+        }
+      };
+
       return (
         <>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
@@ -1474,7 +1487,7 @@ export default function DashboardPage() {
                         {groups.filter(g => g.session_id === selectedFbSessionId).length > 0 ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", maxHeight: "200px", overflowY: "auto", paddingRight: "0.25rem" }}>
                             {groups.filter(g => g.session_id === selectedFbSessionId).map((g) => { const sel = selectedTargets.includes(g.id); return (
-                              <div key={g.id} onClick={() => setSelectedTargets(sel ? selectedTargets.filter(t => t !== g.id) : [...selectedTargets, g.id])}
+                              <div key={g.id} onClick={() => handleToggleTarget(g.id)}
                                 style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #10b981" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(16,185,129,0.12)" : "#f0fdf4") : "var(--input-bg)", cursor: "pointer" }}>
                                 <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Users size={14} color="#10b981" strokeWidth={2} /></div>
                                 <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{g.name}</p>{g.url && <p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.url}</p>}</div>
@@ -1531,7 +1544,7 @@ export default function DashboardPage() {
                         {fbPages.length > 0 ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", maxHeight: "200px", overflowY: "auto", paddingRight: "0.25rem" }}>
                             {fbPages.map((pg: any) => { const sel = selectedTargets.includes(pg.id); return (
-                              <div key={pg.id} onClick={() => setSelectedTargets(sel ? selectedTargets.filter(t => t !== pg.id) : [...selectedTargets, pg.id])}
+                              <div key={pg.id} onClick={() => handleToggleTarget(pg.id)}
                                 style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #1877F2" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(24,119,242,0.13)" : "#f0f6ff") : "var(--input-bg)", cursor: "pointer" }}>
                                 {pg.picture?.data?.url
                                   ? <img src={pg.picture.data.url} alt={pg.name} style={{ width: "28px", height: "28px", borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
