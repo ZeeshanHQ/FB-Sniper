@@ -120,38 +120,63 @@ def _session_cfg(row: dict) -> fb_browser.SessionConfig:
 def _upsert_session(sb, row: dict) -> dict:
     user_id = row["user_id"]
     fb_account_id = row.get("fb_account_id")
+    existing_id = None
     if fb_account_id:
         res = (
             sb.table("fb_sessions")
             .select("id")
             .eq("user_id", user_id)
             .eq("fb_account_id", fb_account_id)
+            .order("created_at", desc=True)
             .limit(1)
             .execute()
         )
         if res.data:
             existing_id = res.data[0]["id"]
+
+    if existing_id:
+        try:
+            row["is_active"] = True
+            updated = sb.table("fb_sessions").update(row).eq("id", existing_id).execute()
+            # Deactivate other duplicate active sessions for the same account ID
             try:
-                updated = sb.table("fb_sessions").update(row).eq("id", existing_id).execute()
-                return updated.data[0]
+                sb.table("fb_sessions").update({"is_active": False, "status": "invalid"}).eq("user_id", user_id).eq("fb_account_id", fb_account_id).neq("id", existing_id).execute()
             except Exception:
-                # If update failed (e.g. fb_avatar_url column doesn't exist yet in DB)
-                if "fb_avatar_url" in row:
-                    row_copy = row.copy()
-                    row_copy.pop("fb_avatar_url", None)
-                    updated = sb.table("fb_sessions").update(row_copy).eq("id", existing_id).execute()
-                    return updated.data[0]
-                raise
+                pass
+            return updated.data[0]
+        except Exception:
+            if "fb_avatar_url" in row:
+                row_copy = row.copy()
+                row_copy.pop("fb_avatar_url", None)
+                row_copy["is_active"] = True
+                updated = sb.table("fb_sessions").update(row_copy).eq("id", existing_id).execute()
+                try:
+                    sb.table("fb_sessions").update({"is_active": False, "status": "invalid"}).eq("user_id", user_id).eq("fb_account_id", fb_account_id).neq("id", existing_id).execute()
+                except Exception:
+                    pass
+                return updated.data[0]
+            raise
     
     try:
         inserted = sb.table("fb_sessions").insert(row).execute()
+        inserted_id = inserted.data[0]["id"]
+        if fb_account_id:
+            try:
+                sb.table("fb_sessions").update({"is_active": False, "status": "invalid"}).eq("user_id", user_id).eq("fb_account_id", fb_account_id).neq("id", inserted_id).execute()
+            except Exception:
+                pass
         return inserted.data[0]
     except Exception:
-        # If insert failed (e.g. fb_avatar_url column doesn't exist yet in DB)
         if "fb_avatar_url" in row:
             row_copy = row.copy()
             row_copy.pop("fb_avatar_url", None)
             inserted = sb.table("fb_sessions").insert(row_copy).execute()
+            inserted_id = inserted.data[0]["id"]
+            if fb_account_id:
+                try:
+                    sb.table("fb_sessions").update({"is_active": False, "status": "invalid"}).eq("user_id", user_id).eq("fb_account_id", fb_account_id).neq("id", inserted_id).execute()
+                except Exception:
+                    pass
             return inserted.data[0]
         raise
 
@@ -320,15 +345,31 @@ async def _enrich_session_profile_bg(user_id: str, session_id: str):
                 update_data["fb_account_name"] = res["fb_account_name"]
             if res.get("fb_avatar_url"):
                 update_data["fb_avatar_url"] = res["fb_avatar_url"]
+            if res.get("fb_account_id"):
+                update_data["fb_account_id"] = res["fb_account_id"]
             if update_data:
                 try:
                     sb.table("fb_sessions").update(update_data).eq("id", session_id).execute()
                     logger.info(f"[fb.py] Successfully updated profile for session {session_id} in background")
+                    
+                    # Deactivate other duplicate active sessions for the same Facebook Account ID
+                    fb_id = res.get("fb_account_id") or row.get("fb_account_id")
+                    if fb_id:
+                        try:
+                            sb.table("fb_sessions").update({"is_active": False, "status": "invalid"}).eq("user_id", user_id).eq("fb_account_id", fb_id).neq("id", session_id).execute()
+                        except Exception:
+                            pass
                 except Exception:
                     # Fallback if fb_avatar_url doesn't exist
                     update_data.pop("fb_avatar_url", None)
                     if update_data:
                         sb.table("fb_sessions").update(update_data).eq("id", session_id).execute()
+                        fb_id = res.get("fb_account_id") or row.get("fb_account_id")
+                        if fb_id:
+                            try:
+                                sb.table("fb_sessions").update({"is_active": False, "status": "invalid"}).eq("user_id", user_id).eq("fb_account_id", fb_id).neq("id", session_id).execute()
+                            except Exception:
+                                pass
     except Exception as exc:
         logger.error(f"[fb.py] Error in background profile enrichment: {exc}")
 
