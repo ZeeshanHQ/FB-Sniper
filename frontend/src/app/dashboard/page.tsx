@@ -1408,18 +1408,20 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
+             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
               <div>
                 <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Action Type</label>
                 <div style={{ display: "flex", borderRadius: "0.5rem", border: "1px solid var(--border)", overflow: "hidden", height: "38px" }}>
-                  {(["Post to group/page", "Comment on post", "Like posts"] as const).map(a => (
-                    <button key={a} type="button" onClick={() => setCampaignType(a)}
-                      style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
-                        backgroundColor: campaignType === a ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
-                        color: campaignType === a ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
-                      {a === "Post to group/page" ? "Post to Group/Page" : a === "Comment on post" ? "Comment on Post" : "Like Posts"}
-                    </button>
-                  ))}
+                  {(["Post to group/page", "Comment on post", "Like posts"] as const)
+                    .filter(a => sniperTargetType === "page" || a === "Post to group/page")
+                    .map(a => (
+                      <button key={a} type="button" onClick={() => setCampaignType(a)}
+                        style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
+                          backgroundColor: campaignType === a ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
+                          color: campaignType === a ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
+                        {a === "Post to group/page" ? "Post to Group/Page" : a === "Comment on post" ? "Comment on Post" : "Like Posts"}
+                      </button>
+                    ))}
                 </div>
               </div>
               <div>
@@ -1444,7 +1446,7 @@ export default function DashboardPage() {
                   <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Target Type</label>
                   <div style={{ display: "flex", borderRadius: "0.5rem", border: "1px solid var(--border)", overflow: "hidden", height: "38px" }}>
                     {(["group", "page"] as const).map(t => (
-                      <button key={t} type="button" onClick={() => { setSniperTargetType(t); setSelectedTargets([]); }}
+                      <button key={t} type="button" onClick={() => { setSniperTargetType(t); setSelectedTargets([]); if (t === "group") setCampaignType("Post to group/page"); }}
                         style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
                           backgroundColor: sniperTargetType === t ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
                           color: sniperTargetType === t ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
