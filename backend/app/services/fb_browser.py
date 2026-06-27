@@ -406,6 +406,48 @@ async def _detect_account(context: BrowserContext) -> Dict[str, Optional[str]]:
     return {"fb_account_id": c_user["value"] if c_user else None}
 
 
+async def _scrape_profile_info(page: Page) -> Dict[str, Optional[str]]:
+    """Scrape display name and avatar image URL from the logged-in Facebook session."""
+    name = None
+    avatar = None
+    try:
+        title = await page.title()
+        if title and "facebook" not in title.lower() and "|" in title:
+            name = title.split("|")[0].strip()
+        elif title:
+            name = title.replace(" | Facebook", "").strip()
+            if name.lower() == "facebook":
+                name = None
+
+        avatar = await page.evaluate("""
+            () => {
+                const isProfilePicUrl = (src) => src && src.includes('fbcdn') && (src.includes('/cpry/') || src.includes('/cpc/') || src.includes('/cprof/') || src.includes('/t39.30808-6/') || src.includes('profile') || src.includes('100x100'));
+                
+                const imgs = Array.from(document.querySelectorAll('img'));
+                const profileImg = imgs.find(img => {
+                    const alt = (img.alt || '').toLowerCase();
+                    return (alt.includes('profile picture') || alt.includes('profile photo') || alt.includes('avatar') || alt.includes('photo de profil')) && isProfilePicUrl(img.src);
+                });
+                if (profileImg) return profileImg.src;
+
+                const topBarImg = document.querySelector('div[aria-label*="Your profile" i] img, div[aria-label*="Account" i] img, div[role="banner"] img[src*="fbcdn"]');
+                if (topBarImg && topBarImg.src) return topBarImg.src;
+
+                const largeImg = imgs.find(img => img.width >= 100 && img.height >= 100 && isProfilePicUrl(img.src));
+                if (largeImg) return largeImg.src;
+
+                const anyImg = imgs.find(img => img.width > 40 && isProfilePicUrl(img.src));
+                if (anyImg) return anyImg.src;
+
+                return null;
+            }
+        """)
+    except Exception as e:
+        logger.warning(f"[fb_browser] Error scraping profile info: {e}")
+    
+    return {"name": name, "avatar": avatar}
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 async def capture_login(cfg: Optional[SessionConfig] = None, timeout_s: int = 180) -> Dict[str, Any]:
@@ -436,14 +478,15 @@ async def capture_login(cfg: Optional[SessionConfig] = None, timeout_s: int = 18
             await context.close()
             return {"success": False, "error": "Login not completed within timeout."}
 
-        # Grab display name (best-effort).
+        # Grab profile info (best-effort).
         name: Optional[str] = None
+        avatar: Optional[str] = None
         try:
             await page.goto("https://www.facebook.com/me/", wait_until="domcontentloaded")
-            await _sleep(1.5, 3.0)
-            name = await page.title()
-            if name:
-                name = name.replace(" | Facebook", "").strip() or None
+            await _sleep(2.0, 4.0)
+            p_info = await _scrape_profile_info(page)
+            name = p_info.get("name")
+            avatar = p_info.get("avatar")
         except Exception:
             pass
 
@@ -453,6 +496,7 @@ async def capture_login(cfg: Optional[SessionConfig] = None, timeout_s: int = 18
             "success": True,
             "fb_account_id": fb_id,
             "fb_account_name": name,
+            "fb_avatar_url": avatar,
             "storage_state": state,
             "user_agent": cfg.user_agent,
         }
@@ -461,7 +505,7 @@ async def capture_login(cfg: Optional[SessionConfig] = None, timeout_s: int = 18
 async def validate_session(
     storage_state: Dict[str, Any], cfg: Optional[SessionConfig] = None, headless: bool = True
 ) -> Dict[str, Any]:
-    """Return {valid, fb_account_id, reason} for a stored session."""
+    """Return {valid, fb_account_id, fb_account_name, fb_avatar_url, reason} for a stored session."""
     cfg = cfg or SessionConfig()
     async with async_playwright() as pw:
         context = await _new_context(pw, cfg, storage_state=storage_state, headless=headless)
@@ -475,7 +519,25 @@ async def validate_session(
                 is_login = await page.locator(SELECTORS["login_form"]).count()
                 reason = "checkpoint_or_logged_out" if is_login else "no_c_user"
                 return {"valid": False, "reason": reason}
-            return {"valid": True, "fb_account_id": info["fb_account_id"]}
+            
+            # Scrape profile info (best-effort)
+            name: Optional[str] = None
+            avatar: Optional[str] = None
+            try:
+                await page.goto("https://www.facebook.com/me/", wait_until="domcontentloaded")
+                await _sleep(1.5, 3.0)
+                p_info = await _scrape_profile_info(page)
+                name = p_info.get("name")
+                avatar = p_info.get("avatar")
+            except Exception:
+                pass
+
+            return {
+                "valid": True,
+                "fb_account_id": info["fb_account_id"],
+                "fb_account_name": name,
+                "fb_avatar_url": avatar
+            }
         except Exception as exc:
             return {"valid": False, "reason": str(exc)}
         finally:

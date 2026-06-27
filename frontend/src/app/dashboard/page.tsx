@@ -95,10 +95,12 @@ export default function DashboardPage() {
   const pagesLoading = accountsLoading;
   const [groups, setGroups]                 = useState<{id:string;name:string;url:string;validation_status?:string;privacy?:string;is_member?:boolean;can_post?:boolean;requires_approval?:boolean;session_id?:string}[]>([]);
   // ── FB Session state ──
-  const [fbSessions, setFbSessions]         = useState<{id:string;fb_account_name:string|null;fb_account_id:string|null;status:string;last_validated_at:string|null}[]>([]);
+  const [fbSessions, setFbSessions]         = useState<{id:string;fb_account_name:string|null;fb_account_id:string|null;fb_avatar_url:string|null;status:string;last_validated_at:string|null;created_at:string}[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [connectingSession, setConnectingSession] = useState(false);
   const [sessionConnectError, setSessionConnectError] = useState<string|null>(null);
+  const [sniperTargetType, setSniperTargetType] = useState<"group" | "page">("group");
+  const [selectedFbSessionId, setSelectedFbSessionId] = useState<string | null>(null);
   // ── Add-group form state ──
   const [showAddGroupForm, setShowAddGroupForm] = useState(false);
   const [addGroupUrl, setAddGroupUrl]         = useState("");
@@ -464,14 +466,23 @@ export default function DashboardPage() {
       .finally(() => setAnalyticsLoading(false));
   }, [activeNav, user?.id]);
 
-  // Load FB sessions + groups when Groups nav is active
+  // Load FB sessions + groups when Groups or Sniper nav is active
   useEffect(() => {
-    if (activeNav !== "Groups" || !user?.id) return;
+    if ((activeNav !== "Groups" && activeNav !== "Sniper") || !user?.id) return;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     setSessionsLoading(true);
     fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`)
       .then(r => r.json())
-      .then(d => { if (d.success) setFbSessions(d.sessions || []); })
+      .then(d => { 
+        if (d.success) {
+          const sessions = d.sessions || [];
+          setFbSessions(sessions);
+          if (sessions.length > 0 && !selectedFbSessionId) {
+            const firstActive = sessions.find((s: any) => s.status === "active") || sessions[0];
+            setSelectedFbSessionId(firstActive.id);
+          }
+        }
+      })
       .catch(() => {})
       .finally(() => setSessionsLoading(false));
     supabase.from("target_groups")
@@ -505,6 +516,109 @@ export default function DashboardPage() {
     await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   }
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper-api.onrender.com";
+
+  const loadSessions = async () => {
+    if (!user?.id) return;
+    setSessionsLoading(true);
+    try {
+      const r = await fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`);
+      const d = await r.json();
+      if (d.success) setFbSessions(d.sessions || []);
+    } catch {} finally { setSessionsLoading(false); }
+  };
+
+  const handleConnectFB = async () => {
+    if (!user?.id) return;
+    setConnectingSession(true); setSessionConnectError(null);
+    try {
+      const r = await fetch(`${apiBase}/api/fb/session/start-browserless`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setLoginModal({ token: d.tracking_id, novncUrl: d.debugger_url });
+        setLoginPollStatus("waiting");
+        // Poll for completion by checking if a new session was added to DB
+        const poll = setInterval(async () => {
+          try {
+            const sr = await fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`);
+            const sd = await sr.json();
+            if (sd.success && sd.sessions && sd.sessions.length > 0) {
+              const mostRecent = sd.sessions[0];
+              if (Date.now() - new Date(mostRecent.created_at).getTime() < 60000) {
+                clearInterval(poll);
+                setLoginPollStatus("done");
+                setTimeout(() => { setLoginModal(null); setLoginPollStatus(null); loadSessions(); }, 2500);
+              }
+            }
+          } catch {}
+        }, 5000);
+        
+        // Auto timeout after 10 minutes
+        setTimeout(() => clearInterval(poll), 600000);
+      } else { setSessionConnectError(d.detail || "Failed to start login service."); }
+    } catch (e: any) { setSessionConnectError("Login service unreachable. See instructions below."); setShowConnectInstructions(true); }
+    finally { setConnectingSession(false); }
+  };
+
+  const handleCopyUserId = () => {
+    if (!user?.id) return;
+    navigator.clipboard.writeText(user.id);
+    setCopiedUserId(true);
+    setTimeout(() => setCopiedUserId(false), 2000);
+  };
+
+  const handleDisconnectSession = async (sid: string) => {
+    if (!user?.id) return;
+    await fetch(`${apiBase}/api/fb/session/disconnect`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user.id, session_id: sid }),
+    });
+    setFbSessions(prev => prev.filter(s => s.id !== sid));
+  };
+
+  const handleFetchGroups = async (sid: string) => {
+    if (!user?.id) return;
+    setFetchingGroups(true); setFetchGroupsError(null);
+    try {
+      const r = await fetch(`${apiBase}/api/fb/groups/fetch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, session_id: sid, persist: true }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        const { data: gData } = await supabase.from("target_groups").select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id").eq("user_id", user.id).eq("is_active", true);
+        if (gData) setGroups(gData);
+      } else setFetchGroupsError(d.detail || "Failed to fetch groups.");
+    } catch (e: any) { setFetchGroupsError(e.message); }
+    finally { setFetchingGroups(false); }
+  };
+
+  const handleAddGroup = async () => {
+    if (!addGroupUrl.trim() || !addGroupSession) return;
+    setAddGroupLoading(true); setAddGroupResult(null);
+    try {
+      const r = await fetch(`${apiBase}/api/fb/groups/validate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user?.id, session_id: addGroupSession, url: addGroupUrl.trim(), name: addGroupName.trim() || undefined, persist: true }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        const v = d.validation || {};
+        const canPost = v.exists && v.can_post;
+        setAddGroupResult({ ok: canPost, msg: canPost ? `✓ Group verified — ${v.privacy || "unknown"} group, you are a member${v.requires_approval ? " (posts need admin approval)" : ""}.` : `✗ ${!v.exists ? "Group not found or URL is invalid." : !v.is_member ? "You are not a member of this group." : "Cannot post in this group."}` });
+        if (canPost) {
+          const { data: gData } = await supabase.from("target_groups").select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id").eq("user_id", user?.id || "").eq("is_active", true);
+          if (gData) setGroups(gData);
+          setAddGroupUrl(""); setAddGroupName("");
+        }
+      } else { setAddGroupResult({ ok: false, msg: d.detail || "Validation failed." }); }
+    } catch (e: any) { setAddGroupResult({ ok: false, msg: e.message }); }
+    finally { setAddGroupLoading(false); }
+  };
 
   async function markNotifRead(id: string) {
     await supabase.from("notifications").update({ read: true }).eq("id", id);
@@ -1198,8 +1312,17 @@ export default function DashboardPage() {
     );
 
     // ── SNIPER ────────────────────────────────────────────────────────────────
-    if (activeNav === "Sniper") return (
-      <>
+    if (activeNav === "Sniper") {
+      const activeSession = fbSessions.find(s => s.id === selectedFbSessionId);
+      const previewName = sniperTargetType === "group"
+        ? (activeSession?.fb_account_name || "Facebook Account")
+        : (fbPages[0]?.name ?? "Your Page");
+      const previewPic = sniperTargetType === "group"
+        ? (activeSession?.fb_avatar_url || (activeSession?.fb_account_id ? `https://graph.facebook.com/${activeSession.fb_account_id}/picture?type=large` : null))
+        : (fbPages[0]?.picture?.data?.url || null);
+
+      return (
+        <>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
           <div>
             <h2 style={{ margin: "0 0 0.25rem", fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 700, fontSize: "1.25rem", color: "var(--text-1)", letterSpacing: "-0.4px" }}>Sniper</h2>
@@ -1239,62 +1362,132 @@ export default function DashboardPage() {
                 )}
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
-                {connectedAccounts.length > 1 && (
-                  <div style={{ marginBottom: "1.25rem" }}>
-                    <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Target Account</label>
-                    <select
-                      value={targetAccountToken || ""}
-                      onChange={(e) => setTargetAccountToken(e.target.value)}
-                      style={{ width: "100%", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.8125rem", outline: "none", fontFamily: "Interdisplay, Arial, sans-serif" }}
-                    >
-                      {connectedAccounts.map((acc: any) => (
-                        <option key={acc.access_token} value={acc.access_token}>
-                          {acc.name || "Facebook Account"} ({acc.pages?.length || 0} Pages)
-                        </option>
-                      ))}
-                    </select>
+              <div style={{ gridColumn: "1 / -1" }}>
+                {/* Segmented control for Target Type */}
+                <div style={{ marginBottom: "1.25rem" }}>
+                  <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Target Type</label>
+                  <div style={{ display: "flex", borderRadius: "0.5rem", border: "1px solid var(--border)", overflow: "hidden", height: "38px" }}>
+                    {(["group", "page"] as const).map(t => (
+                      <button key={t} type="button" onClick={() => { setSniperTargetType(t); setSelectedTargets([]); }}
+                        style={{ flex: 1, border: "none", cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600, transition: "all 0.15s ease",
+                          backgroundColor: sniperTargetType === t ? (resolvedDark ? "#f0f2f5" : "#1d1d1d") : "var(--surface)",
+                          color: sniperTargetType === t ? (resolvedDark ? "#0d0f14" : "#ffffff") : "var(--text-2)" }}>
+                        {t === "group" ? "Facebook Groups (Cookies)" : "Facebook Pages (API)"}
+                      </button>
+                    ))}
                   </div>
-                )}
+                </div>
 
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.5rem" }}>Select Targets</label>
-                {fbPages.length > 0 && (
+                {sniperTargetType === "group" ? (
                   <>
-                    <p style={{ margin: "0 0 0.375rem", fontSize: "0.625rem", fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pages</p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginBottom: groups.length > 0 ? "0.875rem" : 0 }}>
-                      {fbPages.map((pg: any) => { const sel = selectedTargets.includes(pg.id); return (
-                        <div key={pg.id} onClick={() => setSelectedTargets(sel ? selectedTargets.filter(t => t !== pg.id) : [...selectedTargets, pg.id])}
-                          style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #1877F2" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(24,119,242,0.13)" : "#f0f6ff") : "var(--input-bg)", cursor: "pointer" }}>
-                          {pg.picture?.data?.url
-                            ? <img src={pg.picture.data.url} alt={pg.name} style={{ width: "28px", height: "28px", borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
-                            : <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#1877F2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Globe size={14} color="white" /></div>}
-                          <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{pg.name}</p><p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)" }}>{pg.category ?? "Page"}</p></div>
-                          {sel && <CheckCircle2 size={15} color="#1877F2" strokeWidth={2.5} />}
+                    <div style={{ marginBottom: "1.25rem" }}>
+                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Select Facebook Account</label>
+                      {fbSessions.length === 0 ? (
+                        <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
+                          <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No Facebook accounts connected via Chrome Extension.</p>
+                          <button type="button" onClick={() => { setShowConnectInstructions(true); setActiveNav("Groups"); }} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}>
+                            Connect Account Guide
+                          </button>
                         </div>
-                      ); })}
+                      ) : (
+                        <select
+                          value={selectedFbSessionId || ""}
+                          onChange={(e) => setSelectedFbSessionId(e.target.value)}
+                          style={{ width: "100%", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.8125rem", outline: "none" }}
+                        >
+                          <option value="">— Select Facebook Account —</option>
+                          {fbSessions.map(s => (
+                            <option key={s.id} value={s.id}>
+                              {s.fb_account_name || "Facebook Account"} ({s.fb_account_id || "No ID"})
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
-                  </>
-                )}
-                {groups.length > 0 ? (
-                  <>
-                    <p style={{ margin: "0 0 0.375rem", fontSize: "0.625rem", fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Groups</p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-                      {groups.map((g) => { const sel = selectedTargets.includes(g.id); return (
-                        <div key={g.id} onClick={() => setSelectedTargets(sel ? selectedTargets.filter(t => t !== g.id) : [...selectedTargets, g.id])}
-                          style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #10b981" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(16,185,129,0.12)" : "#f0fdf4") : "var(--input-bg)", cursor: "pointer" }}>
-                          <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Users size={14} color="#10b981" strokeWidth={2} /></div>
-                          <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{g.name}</p>{g.url && <p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.url}</p>}</div>
-                          {sel && <CheckCircle2 size={15} color="#10b981" strokeWidth={2.5} />}
-                        </div>
-                      ); })}
-                    </div>
+
+                    {selectedFbSessionId && (
+                      <div style={{ marginBottom: "1rem" }}>
+                        <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.5rem" }}>Select Target Groups</label>
+                        {groups.filter(g => g.session_id === selectedFbSessionId).length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", maxHeight: "200px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                            {groups.filter(g => g.session_id === selectedFbSessionId).map((g) => { const sel = selectedTargets.includes(g.id); return (
+                              <div key={g.id} onClick={() => setSelectedTargets(sel ? selectedTargets.filter(t => t !== g.id) : [...selectedTargets, g.id])}
+                                style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #10b981" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(16,185,129,0.12)" : "#f0fdf4") : "var(--input-bg)", cursor: "pointer" }}>
+                                <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Users size={14} color="#10b981" strokeWidth={2} /></div>
+                                <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{g.name}</p>{g.url && <p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.url}</p>}</div>
+                                {sel && <CheckCircle2 size={15} color="#10b981" strokeWidth={2.5} />}
+                              </div>
+                            ); })}
+                          </div>
+                        ) : (
+                          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
+                            <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No groups found for this Facebook account.</p>
+                            <button
+                              type="button"
+                              onClick={() => handleFetchGroups(selectedFbSessionId)}
+                              disabled={fetchingGroups}
+                              style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}
+                            >
+                              {fetchingGroups ? "Fetching Groups…" : "Auto-fetch Groups"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </>
                 ) : (
-                  <div style={{ padding: "0.625rem 0.875rem", borderRadius: "0.5rem", border: "1px dashed #edf1f4", backgroundColor: "var(--hover-bg)" }}>
-                    <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-3)" }}>No groups added yet —{" "}
-                      <button type="button" onClick={() => { setActiveNav("Groups"); setShowSniperForm(false); }} style={{ background: "none", border: "none", color: "var(--text-1)", fontWeight: 600, cursor: "pointer", padding: 0, fontSize: "0.8125rem", textDecoration: "underline" }}>go to Groups</button>
-                    </p>
-                  </div>
+                  <>
+                    <div style={{ marginBottom: "1.25rem" }}>
+                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Select Meta OAuth Account</label>
+                      {connectedAccounts.length === 0 ? (
+                        <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
+                          <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No Facebook accounts connected via Meta OAuth.</p>
+                          <button type="button" onClick={handleConnectMeta} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}>
+                            Connect Facebook Account
+                          </button>
+                        </div>
+                      ) : (
+                        <select
+                          value={targetAccountToken || ""}
+                          onChange={(e) => setTargetAccountToken(e.target.value)}
+                          style={{ width: "100%", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.8125rem", outline: "none", fontFamily: "Interdisplay, Arial, sans-serif" }}
+                        >
+                          <option value="">— Select Meta Account —</option>
+                          {connectedAccounts.map((acc: any) => (
+                            <option key={acc.access_token} value={acc.access_token}>
+                              {acc.name || "Facebook Account"} ({acc.pages?.length || 0} Pages)
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {targetAccountToken && (
+                      <div style={{ marginBottom: "1rem" }}>
+                        <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.5rem" }}>Select Target Pages</label>
+                        {fbPages.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", maxHeight: "200px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                            {fbPages.map((pg: any) => { const sel = selectedTargets.includes(pg.id); return (
+                              <div key={pg.id} onClick={() => setSelectedTargets(sel ? selectedTargets.filter(t => t !== pg.id) : [...selectedTargets, pg.id])}
+                                style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #1877F2" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(24,119,242,0.13)" : "#f0f6ff") : "var(--input-bg)", cursor: "pointer" }}>
+                                {pg.picture?.data?.url
+                                  ? <img src={pg.picture.data.url} alt={pg.name} style={{ width: "28px", height: "28px", borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                                  : <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#1877F2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Globe size={14} color="white" /></div>}
+                                <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{pg.name}</p><p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)" }}>{pg.category ?? "Page"}</p></div>
+                                {sel && <CheckCircle2 size={15} color="#1877F2" strokeWidth={2.5} />}
+                              </div>
+                            ); })}
+                          </div>
+                        ) : (
+                          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
+                            <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-3)" }}>No pages found for this account.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
+              </div>
               </div>
             </div>
             {/* ── Post action ── */}
@@ -1347,13 +1540,13 @@ export default function DashboardPage() {
                 <div style={{ border: "1px solid #dadde1", borderRadius: "8px", backgroundColor: "#fff", overflow: "hidden", fontFamily: "system-ui, -apple-system, sans-serif" }}>
                   <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
                     <div style={{ width: "40px", height: "40px", borderRadius: "50%", backgroundColor: "#1877F2", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-                      {fbPages[0]?.picture?.data?.url
-                        ? <img src={fbPages[0].picture.data.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      {previewPic
+                        ? <img src={previewPic} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         : <Globe size={20} color="white" strokeWidth={2} />}
                     </div>
                     <div style={{ flex: 1 }}>
-                      <p style={{ margin: "0 0 1px", fontSize: "0.875rem", fontWeight: 700, color: "#050505" }}>{fbPages[0]?.name ?? "Your Page"}</p>
-                      <p style={{ margin: 0, fontSize: "0.75rem", color: "#65676b" }}>Just now · 🌐</p>
+                      <p style={{ margin: "0 0 1px", fontSize: "0.875rem", fontWeight: 700, color: "#050505" }}>{previewName}</p>
+                      <p style={{ margin: 0, fontSize: "0.75rem", color: "#65676b" }}>Just now · {sniperTargetType === "group" ? "👥" : "🌐"}</p>
                     </div>
                     <span style={{ fontSize: "1.25rem", color: "#65676b", cursor: "default", lineHeight: 1 }}>···</span>
                   </div>
@@ -1558,8 +1751,12 @@ export default function DashboardPage() {
                     d.setHours(h, parseInt(scheduleMinute, 10), 0, 0);
                     scheduledAt = d.toISOString();
                   }
-                  const targetGroupIds = groups.filter(g => selectedTargets.includes(g.id)).map(g => g.id);
-                  const targetPageIds  = fbPages.filter((p: any) => selectedTargets.includes(p.id)).map((p: any) => p.id);
+                  const targetGroupIds = sniperTargetType === "group" 
+                    ? groups.filter(g => g.session_id === selectedFbSessionId && selectedTargets.includes(g.id)).map(g => g.id)
+                    : [];
+                  const targetPageIds  = sniperTargetType === "page"
+                    ? fbPages.filter((p: any) => selectedTargets.includes(p.id)).map((p: any) => p.id)
+                    : [];
 
                   if (campaignType === "Post to group/page") {
                     // Use backend endpoint — creates post + optional paired comment atomically
@@ -1661,115 +1858,10 @@ export default function DashboardPage() {
           )}
         </div>
       </>
-    );
+      );
+    }
 
-    // ── GROUPS ────────────────────────────────────────────────────────────────
     if (activeNav === "Groups") {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-      const loadSessions = async () => {
-        if (!user?.id) return;
-        setSessionsLoading(true);
-        try {
-          const r = await fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`);
-          const d = await r.json();
-          if (d.success) setFbSessions(d.sessions || []);
-        } catch {} finally { setSessionsLoading(false); }
-      };
-
-      const handleConnectFB = async () => {
-        if (!user?.id) return;
-        const apiBase = process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper-api.onrender.com";
-        setConnectingSession(true); setSessionConnectError(null);
-        try {
-          const r = await fetch(`${apiBase}/api/fb/session/start-browserless`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: user.id }),
-          });
-          const d = await r.json();
-          if (d.success) {
-            setLoginModal({ token: d.tracking_id, novncUrl: d.debugger_url });
-            setLoginPollStatus("waiting");
-            // Poll for completion by checking if a new session was added to DB
-            const poll = setInterval(async () => {
-              try {
-                const sr = await fetch(`${apiBase}/api/fb/sessions?user_id=${user.id}`);
-                const sd = await sr.json();
-                if (sd.success && sd.sessions && sd.sessions.length > 0) {
-                  // We just check if the most recent session is very new (last 1 minute)
-                  const mostRecent = sd.sessions[0];
-                  if (Date.now() - new Date(mostRecent.created_at).getTime() < 60000) {
-                    clearInterval(poll);
-                    setLoginPollStatus("done");
-                    setTimeout(() => { setLoginModal(null); setLoginPollStatus(null); loadSessions(); }, 2500);
-                  }
-                }
-              } catch {}
-            }, 5000);
-            
-            // Auto timeout after 10 minutes
-            setTimeout(() => clearInterval(poll), 600000);
-          } else { setSessionConnectError(d.detail || "Failed to start login service."); }
-        } catch (e: any) { setSessionConnectError("Login service unreachable. See instructions below."); setShowConnectInstructions(true); }
-        finally { setConnectingSession(false); }
-      };
-
-      const handleCopyUserId = () => {
-        if (!user?.id) return;
-        navigator.clipboard.writeText(user.id);
-        setCopiedUserId(true);
-        setTimeout(() => setCopiedUserId(false), 2000);
-      };
-
-      const handleDisconnectSession = async (sid: string) => {
-        if (!user?.id) return;
-        await fetch(`${apiBase}/api/fb/session/disconnect`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: user.id, session_id: sid }),
-        });
-        setFbSessions(prev => prev.filter(s => s.id !== sid));
-      };
-
-      const handleFetchGroups = async (sid: string) => {
-        if (!user?.id) return;
-        setFetchingGroups(true); setFetchGroupsError(null);
-        try {
-          const r = await fetch(`${apiBase}/api/fb/groups/fetch`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: user.id, session_id: sid, persist: true }),
-          });
-          const d = await r.json();
-          if (d.success) {
-            const { data: gData } = await supabase.from("target_groups").select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id").eq("user_id", user.id).eq("is_active", true);
-            if (gData) setGroups(gData);
-          } else setFetchGroupsError(d.detail || "Failed to fetch groups.");
-        } catch (e: any) { setFetchGroupsError(e.message); }
-        finally { setFetchingGroups(false); }
-      };
-
-      const handleAddGroup = async () => {
-        if (!addGroupUrl.trim() || !addGroupSession) return;
-        setAddGroupLoading(true); setAddGroupResult(null);
-        try {
-          const r = await fetch(`${apiBase}/api/fb/groups/validate`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: user?.id, session_id: addGroupSession, url: addGroupUrl.trim(), name: addGroupName.trim() || undefined, persist: true }),
-          });
-          const d = await r.json();
-          if (d.success) {
-            const v = d.validation || {};
-            const canPost = v.exists && v.can_post;
-            setAddGroupResult({ ok: canPost, msg: canPost ? `✓ Group verified — ${v.privacy || "unknown"} group, you are a member${v.requires_approval ? " (posts need admin approval)" : ""}.` : `✗ ${!v.exists ? "Group not found or URL is invalid." : !v.is_member ? "You are not a member of this group." : "Cannot post in this group."}` });
-            if (canPost) {
-              const { data: gData } = await supabase.from("target_groups").select("id,name,url,validation_status,privacy,is_member,can_post,requires_approval,session_id").eq("user_id", user?.id || "").eq("is_active", true);
-              if (gData) setGroups(gData);
-              setAddGroupUrl(""); setAddGroupName("");
-            }
-          } else { setAddGroupResult({ ok: false, msg: d.detail || "Validation failed." }); }
-        } catch (e: any) { setAddGroupResult({ ok: false, msg: e.message }); }
-        finally { setAddGroupLoading(false); }
-      };
-
       const getStatusBadge = (g: typeof groups[0]) => {
         const s = g.validation_status;
         if (s === "valid" && g.can_post) return { bg: "#f0fdf4", border: "#bbf7d0", dot: "#10b981", text: "#166534", label: "Active" };
@@ -1888,16 +1980,29 @@ export default function DashboardPage() {
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem", marginBottom: "1rem" }}>
                   {[
-                    { n: "1", t: "Open Chrome Extensions", code: "Go to chrome://extensions in your browser URL bar" },
-                    { n: "2", t: "Enable Developer Mode", code: "Toggle the 'Developer mode' switch in the top-right corner" },
-                    { n: "3", t: "Load Extension", code: "Click 'Load unpacked' in the top-left and select the 'extension' folder in this project's directory" },
-                    { n: "4", t: "Set Server API URL inside Extension Popup", code: process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper.onrender.com" },
-                  ].map(({ n, t, code }) => (
+                    { n: "1", t: "Open Chrome Extensions", code: "Go to chrome://extensions in your browser URL bar", isNode: false },
+                    { n: "2", t: "Enable Developer Mode", code: "Toggle the 'Developer mode' switch in the top-right corner", isNode: false },
+                    { 
+                      n: "3", 
+                      t: "Download & Load Extension", 
+                      code: (
+                        <span>
+                          Download the <a href="/extension.zip" download style={{ color: "#3b82f6", textDecoration: "underline", fontWeight: 600 }}>helper extension ZIP</a>, extract it, then click 'Load unpacked' and select the extracted folder.
+                        </span>
+                      ),
+                      isNode: true
+                    },
+                    { n: "4", t: "Set Server API URL inside Extension Popup", code: process.env.NEXT_PUBLIC_API_URL || "https://fb-sniper.onrender.com", isNode: false },
+                  ].map(({ n, t, code, isNode }) => (
                     <div key={n} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
                       <div style={{ width: "22px", height: "22px", borderRadius: "50%", backgroundColor: "#1d1d1d", color: "#fff", fontSize: "0.6875rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "1px" }}>{n}</div>
                       <div style={{ minWidth: 0 }}>
                         <p style={{ margin: "0 0 0.2rem", fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{t}</p>
-                        <code style={{ fontSize: "0.75rem", color: "var(--text-2)", backgroundColor: "var(--surface)", padding: "0.2rem 0.5rem", borderRadius: "0.3rem", border: "1px solid var(--border)", display: "inline-block", wordBreak: "break-all" }}>{code}</code>
+                        {isNode ? (
+                          <div style={{ fontSize: "0.8125rem", color: "var(--text-2)", lineHeight: 1.5 }}>{code}</div>
+                        ) : (
+                          <code style={{ fontSize: "0.75rem", color: "var(--text-2)", backgroundColor: "var(--surface)", padding: "0.2rem 0.5rem", borderRadius: "0.3rem", border: "1px solid var(--border)", display: "inline-block", wordBreak: "break-all" }}>{code as string}</code>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1942,7 +2047,7 @@ export default function DashboardPage() {
                       <div style={{ position: "relative", width: "36px", height: "36px", flexShrink: 0 }}>
                         {s.fb_account_id ? (
                           <img 
-                            src={`https://graph.facebook.com/${s.fb_account_id}/picture?type=large`} 
+                            src={s.fb_avatar_url || `https://graph.facebook.com/${s.fb_account_id}/picture?type=large`} 
                             alt="FB Profile" 
                             style={{ 
                               width: "36px", 

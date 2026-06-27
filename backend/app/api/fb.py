@@ -70,6 +70,7 @@ class StoreSessionRequest(BaseModel):
     storage_state: dict          # raw Playwright storage_state (plain JSON from local script)
     fb_account_name: Optional[str] = None
     fb_account_id: Optional[str] = None
+    fb_avatar_url: Optional[str] = None
     user_agent: Optional[str] = None
     proxy: Optional[str] = None
 
@@ -130,13 +131,29 @@ def _upsert_session(sb, row: dict) -> dict:
         )
         if res.data:
             existing_id = res.data[0]["id"]
-            # If the session already exists, update it to keep the session ID stable!
-            updated = sb.table("fb_sessions").update(row).eq("id", existing_id).execute()
-            return updated.data[0]
+            try:
+                updated = sb.table("fb_sessions").update(row).eq("id", existing_id).execute()
+                return updated.data[0]
+            except Exception:
+                # If update failed (e.g. fb_avatar_url column doesn't exist yet in DB)
+                if "fb_avatar_url" in row:
+                    row_copy = row.copy()
+                    row_copy.pop("fb_avatar_url", None)
+                    updated = sb.table("fb_sessions").update(row_copy).eq("id", existing_id).execute()
+                    return updated.data[0]
+                raise
     
-    # Otherwise, insert a new session
-    inserted = sb.table("fb_sessions").insert(row).execute()
-    return inserted.data[0]
+    try:
+        inserted = sb.table("fb_sessions").insert(row).execute()
+        return inserted.data[0]
+    except Exception:
+        # If insert failed (e.g. fb_avatar_url column doesn't exist yet in DB)
+        if "fb_avatar_url" in row:
+            row_copy = row.copy()
+            row_copy.pop("fb_avatar_url", None)
+            inserted = sb.table("fb_sessions").insert(row_copy).execute()
+            return inserted.data[0]
+        raise
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -158,6 +175,7 @@ async def start_session(req: StartSessionRequest):
         "user_id": req.user_id,
         "fb_account_name": result.get("fb_account_name"),
         "fb_account_id": result.get("fb_account_id"),
+        "fb_avatar_url": result.get("fb_avatar_url"),
         "storage_state": encrypted,
         "status": "active",
         "proxy": req.proxy,
@@ -188,12 +206,13 @@ async def _browserless_capture_bg_running(pw, browser, context, page, user_id: s
             return
             
         name = None
+        avatar = None
         try:
             await page.goto("https://www.facebook.com/me/", wait_until="domcontentloaded")
-            await asyncio.sleep(2)
-            name = await page.title()
-            if name:
-                name = name.replace(" | Facebook", "").strip() or None
+            await asyncio.sleep(3)
+            p_info = await fb_browser._scrape_profile_info(page)
+            name = p_info.get("name")
+            avatar = p_info.get("avatar")
         except Exception:
             pass
             
@@ -205,6 +224,7 @@ async def _browserless_capture_bg_running(pw, browser, context, page, user_id: s
             "user_id": user_id,
             "fb_account_name": name,
             "fb_account_id": fb_id,
+            "fb_avatar_url": avatar,
             "storage_state": encrypted,
             "status": "active",
             "proxy": proxy,
@@ -287,8 +307,34 @@ async def start_browserless(req: StartSessionRequest, background_tasks: Backgrou
     }
 
 
+async def _enrich_session_profile_bg(user_id: str, session_id: str):
+    logger.info(f"[fb.py] Background profile enrichment started for session {session_id}")
+    sb = _sb()
+    try:
+        row = _load_session(sb, user_id, session_id)
+        state = decrypt_state(row["storage_state"])
+        res = await fb_browser.validate_session(state, cfg=_session_cfg(row))
+        if res.get("valid"):
+            update_data = {}
+            if res.get("fb_account_name"):
+                update_data["fb_account_name"] = res["fb_account_name"]
+            if res.get("fb_avatar_url"):
+                update_data["fb_avatar_url"] = res["fb_avatar_url"]
+            if update_data:
+                try:
+                    sb.table("fb_sessions").update(update_data).eq("id", session_id).execute()
+                    logger.info(f"[fb.py] Successfully updated profile for session {session_id} in background")
+                except Exception:
+                    # Fallback if fb_avatar_url doesn't exist
+                    update_data.pop("fb_avatar_url", None)
+                    if update_data:
+                        sb.table("fb_sessions").update(update_data).eq("id", session_id).execute()
+    except Exception as exc:
+        logger.error(f"[fb.py] Error in background profile enrichment: {exc}")
+
+
 @router.post("/session/store")
-async def store_session(req: StoreSessionRequest):
+async def store_session(req: StoreSessionRequest, background_tasks: BackgroundTasks):
     """
     Accept a storage_state captured by the LOCAL login script, encrypt it,
     and persist to DB. This is the production path when the backend runs on
@@ -300,6 +346,7 @@ async def store_session(req: StoreSessionRequest):
         "user_id": req.user_id,
         "fb_account_name": req.fb_account_name,
         "fb_account_id": req.fb_account_id,
+        "fb_avatar_url": req.fb_avatar_url,
         "storage_state": encrypted,
         "status": "active",
         "proxy": req.proxy,
@@ -308,6 +355,12 @@ async def store_session(req: StoreSessionRequest):
         "is_active": True,
     }
     out = _upsert_session(sb, row)
+    session_id = out["id"]
+    
+    # Run background validation and group scraping/enrichment if avatar_url is missing
+    if not req.fb_avatar_url or req.fb_account_name == "Facebook Account":
+        background_tasks.add_task(_enrich_session_profile_bg, req.user_id, session_id)
+        
     out.pop("storage_state", None)
     return {"success": True, "session": out}
 
@@ -315,15 +368,30 @@ async def store_session(req: StoreSessionRequest):
 @router.get("/sessions")
 async def list_sessions(user_id: str):
     sb = _sb()
-    res = (
-        sb.table("fb_sessions")
-        .select("id, fb_account_name, fb_account_id, status, proxy, last_validated_at, last_error, created_at")
-        .eq("user_id", user_id)
-        .eq("is_active", True)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return {"success": True, "sessions": res.data or []}
+    try:
+        res = (
+            sb.table("fb_sessions")
+            .select("id, fb_account_name, fb_account_id, fb_avatar_url, status, proxy, last_validated_at, last_error, created_at")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return {"success": True, "sessions": res.data or []}
+    except Exception:
+        # Fall back if fb_avatar_url column doesn't exist yet
+        res = (
+            sb.table("fb_sessions")
+            .select("id, fb_account_name, fb_account_id, status, proxy, last_validated_at, last_error, created_at")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        data = res.data or []
+        for row in data:
+            row["fb_avatar_url"] = None
+        return {"success": True, "sessions": data}
 
 
 @router.post("/session/validate")
@@ -337,11 +405,23 @@ async def validate(req: SessionRefRequest):
 
     res = await fb_browser.validate_session(state, cfg=_session_cfg(row))
     new_status = "active" if res.get("valid") else "expired"
-    sb.table("fb_sessions").update({
+    
+    update_data = {
         "status": new_status,
         "last_validated_at": _now(),
         "last_error": None if res.get("valid") else res.get("reason"),
-    }).eq("id", req.session_id).execute()
+    }
+    if res.get("valid"):
+        if res.get("fb_account_name"):
+            update_data["fb_account_name"] = res["fb_account_name"]
+        if res.get("fb_avatar_url"):
+            update_data["fb_avatar_url"] = res["fb_avatar_url"]
+
+    try:
+        sb.table("fb_sessions").update(update_data).eq("id", req.session_id).execute()
+    except Exception:
+        update_data.pop("fb_avatar_url", None)
+        sb.table("fb_sessions").update(update_data).eq("id", req.session_id).execute()
 
     return {"success": True, "valid": res.get("valid"), "status": new_status, "reason": res.get("reason")}
 
