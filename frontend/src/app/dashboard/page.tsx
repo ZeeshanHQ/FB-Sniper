@@ -457,7 +457,13 @@ export default function DashboardPage() {
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
       )
-        .then(({ data }) => setCampaigns(data ?? []))
+        .then(({ data }) => {
+          if (!data) { setCampaigns([]); return; }
+          // Deduplicate by id to prevent double-renders from concurrent state + poll updates
+          const seen = new Set<string>();
+          const unique = data.filter((c: any) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+          setCampaigns(unique);
+        })
         .finally(() => setCampaignsLoading(false));
     };
     fetchCampaigns(true);
@@ -1860,9 +1866,15 @@ export default function DashboardPage() {
                       });
                       const json = await res.json();
                       if (!res.ok) { setLaunchError(json.detail || "Failed to launch campaign."); return; }
-                      // Refresh campaign list from DB so we get the full row
-                      const { data: newCamp } = await supabase.from("automation_posts").select("*").eq("id", json.post_id).single();
-                      if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
+                      // Refresh full campaign list from DB (avoids duplicates from concurrent state + interval poll)
+                      const { data: allCamps } = await supabase.from("automation_posts")
+                        .select("id, content, target_groups, target_pages, status, scheduled_at, metadata, created_at")
+                        .eq("user_id", user.id)
+                        .order("created_at", { ascending: false });
+                      if (allCamps) {
+                        const seen = new Set<string>();
+                        setCampaigns(allCamps.filter((c: any) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; }));
+                      }
                     } else {
                       // Comment-trigger and Like campaigns go direct to Supabase (no paired comment needed)
                       const { data: newCamp } = await supabase.from("automation_posts").insert({
@@ -1874,7 +1886,17 @@ export default function DashboardPage() {
                         scheduled_at:  scheduledAt,
                         metadata:      { action_type: campaignType, frequency, media_url: uploadedUrl ?? null, trigger_keywords: triggerKeywords || null, auto_reply: autoReply || null },
                       }).select().single();
-                      if (newCamp) setCampaigns(prev => [newCamp, ...prev]);
+                      if (newCamp) {
+                        // Refresh full list to avoid duplicates with interval poll
+                        const { data: allCamps } = await supabase.from("automation_posts")
+                          .select("id, content, target_groups, target_pages, status, scheduled_at, metadata, created_at")
+                          .eq("user_id", user.id)
+                          .order("created_at", { ascending: false });
+                        if (allCamps) {
+                          const seen = new Set<string>();
+                          setCampaigns(allCamps.filter((c: any) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; }));
+                        }
+                      }
                     }
 
                     // Increment database counter fields in users table dynamically
