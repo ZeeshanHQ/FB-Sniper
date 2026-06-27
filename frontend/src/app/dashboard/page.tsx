@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Target, Users, Globe, Clock, BarChart3,
   Key, Settings, LogOut, Bell, ChevronDown, TrendingUp,
   Activity, CheckCircle2, Zap, ArrowUpRight,
-  FileText, AlertCircle, PanelLeftClose, PanelLeftOpen,
+  FileText, AlertCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen,
   Sun, Moon, Monitor, Plus, Send, Link2, Calendar,
   XCircle, TrendingDown, Trash2, Play, Hash, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, User,
 } from "lucide-react";
@@ -113,6 +113,7 @@ export default function DashboardPage() {
   const [connectingSession, setConnectingSession] = useState(false);
   const [sessionConnectError, setSessionConnectError] = useState<string|null>(null);
   const [sniperTargetType, setSniperTargetType] = useState<"group" | "page">("group");
+  const [campaignsTodayCount, setCampaignsTodayCount] = useState(0);
   const [selectedFbSessionId, setSelectedFbSessionId] = useState<string | null>(null);
   // ── Add-group form state ──
   const [showAddGroupForm, setShowAddGroupForm] = useState(false);
@@ -505,6 +506,23 @@ export default function DashboardPage() {
       .order("created_at", { ascending: true })
       .then(({ data }) => { if (data) setGroups(data); });
   }, [activeNav, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load daily campaign creation count when Sniper nav is active
+  useEffect(() => {
+    if (activeNav !== "Sniper" || !user?.id) return;
+    const checkDailyLimit = async () => {
+      try {
+        const gteTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count } = await supabase
+          .from("automation_posts")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .gte("created_at", gteTime);
+        setCampaignsTodayCount(count || 0);
+      } catch {}
+    };
+    checkDailyLimit();
+  }, [activeNav, user?.id, campaignCount]);
 
   // Pages are now fetched concurrently alongside user info.
 
@@ -1334,6 +1352,9 @@ export default function DashboardPage() {
         ? (activeSession?.fb_avatar_url || (activeSession?.fb_account_id ? `https://graph.facebook.com/${activeSession.fb_account_id}/picture?type=large` : null))
         : (fbPages[0]?.picture?.data?.url || null);
 
+      const DAILY_LIMIT = 5;
+      const limitReached = campaignsTodayCount >= DAILY_LIMIT;
+
       return (
         <>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
@@ -1348,7 +1369,22 @@ export default function DashboardPage() {
 
         {showSniperForm && (
           <div style={{ ...card, padding: "1.5rem", marginBottom: "1.25rem" }}>
-            <h3 style={{ ...h3, marginBottom: "1.25rem" }}>Campaign Setup</h3>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.25rem" }}>
+              <h3 style={{ ...h3, margin: 0 }}>Campaign Setup</h3>
+              <span style={{ fontSize: "0.75rem", fontWeight: 600, color: limitReached ? "#ef4444" : "var(--text-3)" }}>
+                Daily Budget: {campaignsTodayCount}/{DAILY_LIMIT} Campaigns
+              </span>
+            </div>
+
+            {limitReached && (
+              <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem 1rem", backgroundColor: resolvedDark ? "rgba(217,119,6,0.12)" : "#fffbeb", borderRadius: "0.5rem", border: "1px solid #fde68a", marginBottom: "1.25rem", alignItems: "center" }}>
+                <AlertTriangle size={16} color="#d97706" strokeWidth={2.5} style={{ flexShrink: 0 }} />
+                <p style={{ margin: 0, fontSize: "0.8125rem", color: resolvedDark ? "#f59e0b" : "#b45309", fontWeight: 600 }}>
+                  Daily campaign budget reached ({campaignsTodayCount}/{DAILY_LIMIT} created in last 24h). Upgrade to our Enterprise tier to bypass limits and automate unlimited posts securely!
+                </p>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
               <div>
                 <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Action Type</label>
@@ -1754,9 +1790,9 @@ export default function DashboardPage() {
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
               <button onClick={() => setShowSniperForm(false)} style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-2)", fontSize: "0.8125rem", fontWeight: 500, cursor: "pointer" }}>Cancel</button>
               <button
-                disabled={launchingCampaign}
+                disabled={launchingCampaign || limitReached}
                 onClick={async () => {
-                  if (!user?.id || launchingCampaign) return;
+                  if (!user?.id || launchingCampaign || limitReached) return;
                   if (selectedTargets.length === 0) { setLaunchError("Select at least one Page or Group before launching."); return; }
                   setLaunchError("");
                   setLaunchingCampaign(true);
@@ -1828,7 +1864,7 @@ export default function DashboardPage() {
                     setLaunchingCampaign(false);
                   }
                 }}
-                style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: "0.5rem", opacity: launchingCampaign ? 0.75 : 1, cursor: launchingCampaign ? "not-allowed" : "pointer" }}
+                style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: "0.5rem", opacity: (launchingCampaign || limitReached) ? 0.6 : 1, cursor: (launchingCampaign || limitReached) ? "not-allowed" : "pointer" }}
               >
                 {launchingCampaign ? (
                   <>

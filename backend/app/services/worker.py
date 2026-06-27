@@ -556,8 +556,8 @@ async def _playwright_post_to_groups(
                         logger.warning(f"[Worker] Playwright post failed for '{g.get('name')}': {err}")
                         if not skip_reason and not created:
                             skip_reason = err
-                    # Human-paced inter-group delay
-                    await asyncio.sleep(random.uniform(8, 18))
+                    # Human-paced inter-group delay (1-3 minutes is standard to prevent cookie checkpointing)
+                    await asyncio.sleep(random.uniform(60, 180))
     finally:
         if temp_img_path and os.path.exists(temp_img_path):
             try:
