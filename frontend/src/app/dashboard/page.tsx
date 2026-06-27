@@ -790,9 +790,9 @@ export default function DashboardPage() {
                       }
                     });
                 }
-              } else { setMetaError(data.error ?? "exchange_failed"); }
+              } else { setMetaError(data.details ? `exchange failed: ${data.details}` : (data.error ?? "exchange_failed")); }
             })
-            .catch(() => setMetaError("network_error"))
+            .catch((e: any) => setMetaError(e?.message ? `network error: ${e.message}` : "network_error"))
             .finally(() => setTokenVerifying(false));
         }
       },

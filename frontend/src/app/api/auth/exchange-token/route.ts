@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     if (longData.error) {
       console.error("[exchange-token] long-lived error:", longData.error);
-      return NextResponse.json({ success: false, error: "exchange_failed" });
+      return NextResponse.json({ success: false, error: "exchange_failed", details: longData.error.message });
     }
 
     const finalToken = longData.access_token ?? shortToken;
@@ -76,8 +76,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, meta_name: meData.name ?? null });
-  } catch (err) {
+  } catch (err: any) {
     console.error("[exchange-token] error:", err);
-    return NextResponse.json({ success: false, error: "server_error" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "server_error", details: err?.message || String(err) }, { status: 500 });
   }
 }
