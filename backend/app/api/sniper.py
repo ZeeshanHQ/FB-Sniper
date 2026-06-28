@@ -32,6 +32,7 @@ class SchedulePostRequest(BaseModel):
     media_url:             Optional[str] = None
     comment:               Optional[str] = None
     comment_delay_minutes: int = 0
+    metadata:              Optional[Dict[str, Any]] = None
 
 
 class PostRequest(BaseModel):
@@ -80,6 +81,14 @@ async def schedule_post(req: SchedulePostRequest):
             except Exception:
                 pass
 
+        meta = {
+            "action_type": "Post to group/page",
+            "frequency":   req.frequency,
+            "media_url":   req.media_url,
+        }
+        if req.metadata:
+            meta.update(req.metadata)
+
         post_row = (
             sb.table("automation_posts")
             .insert({
@@ -89,11 +98,7 @@ async def schedule_post(req: SchedulePostRequest):
                 "target_pages":  req.target_pages,
                 "status":        initial_status,
                 "scheduled_at":  req.scheduled_at,
-                "metadata": {
-                    "action_type": "Post to group/page",
-                    "frequency":   req.frequency,
-                    "media_url":   req.media_url,
-                },
+                "metadata":      meta,
             })
             .execute()
         )

@@ -133,6 +133,7 @@ export default function DashboardPage() {
   const [loginPollStatus, setLoginPollStatus]   = useState<"waiting"|"done"|"error"|null>(null);
   const [campaignCount, setCampaignCount]   = useState(0);
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
+  const [groupSessionOverrides, setGroupSessionOverrides] = useState<Record<string, string>>({});
   const [showCalendar, setShowCalendar]     = useState(false);
   const [scheduleDate, setScheduleDate]     = useState<Date | null>(null);
   const [calViewDate, setCalViewDate]       = useState(new Date());
@@ -1464,60 +1465,106 @@ export default function DashboardPage() {
 
                 {sniperTargetType === "group" ? (
                   <>
-                    <div style={{ marginBottom: "1.25rem" }}>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Select Facebook Account</label>
+                    <div style={{ marginBottom: "1rem" }}>
+                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.5rem" }}>Select Target Groups</label>
                       {fbSessions.length === 0 ? (
                         <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
-                          <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No Facebook accounts connected via Chrome Extension.</p>
-                          <button type="button" onClick={() => { setShowConnectInstructions(true); setActiveNav("Groups"); }} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}>
-                            Connect Account Guide
+                          <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No Facebook accounts connected. Please go to the Facebook Accounts page to connect one.</p>
+                          <button type="button" onClick={() => setActiveNav("Facebook Accounts")} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}>
+                            Connect Account
                           </button>
                         </div>
+                      ) : groups.length > 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "250px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                          {groups.map((g) => {
+                            const sel = selectedTargets.includes(g.id);
+                            const owningSession = fbSessions.find(s => s.id === g.session_id);
+                            const accountName = owningSession?.fb_account_name || "Facebook Account";
+                            const activeSessionId = groupSessionOverrides[g.id] || g.session_id || "";
+
+                            return (
+                              <div key={g.id} onClick={() => handleToggleTarget(g.id)}
+                                style={{ 
+                                  display: "flex", 
+                                  flexDirection: "column", 
+                                  gap: "0.5rem", 
+                                  padding: "0.625rem 0.875rem", 
+                                  borderRadius: "0.5rem", 
+                                  border: sel ? "1.5px solid #10b981" : "1px solid var(--border)", 
+                                  backgroundColor: sel ? (resolvedDark ? "rgba(16,185,129,0.12)" : "#f0fdf4") : "var(--input-bg)", 
+                                  cursor: "pointer",
+                                  transition: "all 0.15s ease" 
+                                }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                                  <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                    <Users size={14} color="#10b981" strokeWidth={2} />
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.125rem" }}>
+                                      <p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "200px" }}>{g.name}</p>
+                                      <span style={{ 
+                                        fontSize: "0.625rem", 
+                                        fontWeight: 600, 
+                                        padding: "0.125rem 0.375rem", 
+                                        borderRadius: "0.25rem", 
+                                        backgroundColor: "rgba(59,130,246,0.1)", 
+                                        color: "#3b82f6", 
+                                        border: "1px solid rgba(59,130,246,0.2)" 
+                                      }}>
+                                        Owner: {accountName}
+                                      </span>
+                                    </div>
+                                    {g.url && <p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.url}</p>}
+                                  </div>
+                                  {sel && <CheckCircle2 size={15} color="#10b981" strokeWidth={2.5} />}
+                                </div>
+
+                                {sel && (
+                                  <div onClick={(e) => e.stopPropagation()} 
+                                    style={{ 
+                                      display: "flex", 
+                                      alignItems: "center", 
+                                      gap: "0.5rem", 
+                                      marginTop: "0.25rem", 
+                                      paddingTop: "0.5rem", 
+                                      borderTop: "1px dashed var(--border)" 
+                                    }}>
+                                    <span style={{ fontSize: "0.75rem", color: "var(--text-2)", fontWeight: 500 }}>Post As:</span>
+                                    <select
+                                      value={activeSessionId}
+                                      onChange={(e) => {
+                                        const newSid = e.target.value;
+                                        setGroupSessionOverrides(prev => ({ ...prev, [g.id]: newSid }));
+                                      }}
+                                      style={{ 
+                                        flex: 1, 
+                                        padding: "0.25rem 0.5rem", 
+                                        borderRadius: "0.375rem", 
+                                        border: "1px solid var(--border)", 
+                                        backgroundColor: "var(--surface)", 
+                                        color: "var(--text-1)", 
+                                        fontSize: "0.75rem", 
+                                        outline: "none" 
+                                      }}
+                                    >
+                                      {fbSessions.map(s => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.fb_account_name || "Facebook Account"} {s.status === "expired" ? "(Expired)" : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       ) : (
-                        <select
-                          value={selectedFbSessionId || ""}
-                          onChange={(e) => setSelectedFbSessionId(e.target.value)}
-                          style={{ width: "100%", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-1)", fontSize: "0.8125rem", outline: "none" }}
-                        >
-                          <option value="">— Select Facebook Account —</option>
-                          {fbSessions.map(s => (
-                            <option key={s.id} value={s.id}>
-                              {s.fb_account_name || "Facebook Account"} ({s.fb_account_id || "No ID"})
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
+                          <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No groups found. Please auto-fetch groups from the Groups tab first.</p>
+                        </div>
                       )}
                     </div>
-
-                    {selectedFbSessionId && (
-                      <div style={{ marginBottom: "1rem" }}>
-                        <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.5rem" }}>Select Target Groups</label>
-                        {groups.filter(g => g.session_id === selectedFbSessionId).length > 0 ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", maxHeight: "200px", overflowY: "auto", paddingRight: "0.25rem" }}>
-                            {groups.filter(g => g.session_id === selectedFbSessionId).map((g) => { const sel = selectedTargets.includes(g.id); return (
-                              <div key={g.id} onClick={() => handleToggleTarget(g.id)}
-                                style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.5rem", border: sel ? "1.5px solid #10b981" : "1px solid var(--border)", backgroundColor: sel ? (resolvedDark ? "rgba(16,185,129,0.12)" : "#f0fdf4") : "var(--input-bg)", cursor: "pointer" }}>
-                                <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Users size={14} color="#10b981" strokeWidth={2} /></div>
-                                <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-1)" }}>{g.name}</p>{g.url && <p style={{ margin: 0, fontSize: "0.6875rem", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.url}</p>}</div>
-                                {sel && <CheckCircle2 size={15} color="#10b981" strokeWidth={2.5} />}
-                              </div>
-                            ); })}
-                          </div>
-                        ) : (
-                          <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
-                            <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No groups found for this Facebook account.</p>
-                            <button
-                              type="button"
-                              onClick={() => handleFetchGroups(selectedFbSessionId)}
-                              disabled={fetchingSessionId !== null}
-                              style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}
-                            >
-                              {fetchingSessionId === selectedFbSessionId ? "Fetching Groups…" : "Auto-fetch Groups"}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </>
                 ) : (
                   <>
@@ -1838,11 +1885,24 @@ export default function DashboardPage() {
                       scheduledAt = d.toISOString();
                     }
                     const targetGroupIds = sniperTargetType === "group" 
-                      ? groups.filter(g => g.session_id === selectedFbSessionId && selectedTargets.includes(g.id)).map(g => g.id)
+                      ? groups.filter(g => selectedTargets.includes(g.id)).map(g => g.id)
                       : [];
                     const targetPageIds  = sniperTargetType === "page"
                       ? fbPages.filter((p: any) => selectedTargets.includes(p.id)).map((p: any) => p.id)
                       : [];
+
+                    const groupSessionMapping: Record<string, string> = {};
+                    targetGroupIds.forEach(gid => {
+                      const customSid = groupSessionOverrides[gid];
+                      if (customSid) {
+                        groupSessionMapping[gid] = customSid;
+                      } else {
+                        const originalGroup = groups.find(g => g.id === gid);
+                        if (originalGroup?.session_id) {
+                          groupSessionMapping[gid] = originalGroup.session_id;
+                        }
+                      }
+                    });
 
                     if (campaignType === "Post to group/page") {
                       // Use backend endpoint — creates post + optional paired comment atomically
@@ -1862,6 +1922,9 @@ export default function DashboardPage() {
                           comment_delay_minutes: firstComment.trim()
                             ? (commentDelayMode === "Now" ? 0 : commentDelayMode === "15m" ? 15 : commentDelayMode === "30m" ? 30 : commentDelayMode === "1hr" ? 60 : parseInt(commentDelayCustom, 10) || 0)
                             : 0,
+                          metadata: {
+                            group_session_mapping: groupSessionMapping
+                          }
                         }),
                       });
                       const json = await res.json();
@@ -1884,7 +1947,7 @@ export default function DashboardPage() {
                         target_pages:  targetPageIds,
                         status:        scheduledAt ? "scheduled" : "pending",
                         scheduled_at:  scheduledAt,
-                        metadata:      { action_type: campaignType, frequency, media_url: uploadedUrl ?? null, trigger_keywords: triggerKeywords || null, auto_reply: autoReply || null },
+                        metadata:      { action_type: campaignType, frequency, media_url: uploadedUrl ?? null, trigger_keywords: triggerKeywords || null, auto_reply: autoReply || null, group_session_mapping: groupSessionMapping },
                       }).select().single();
                       if (newCamp) {
                         // Refresh full list to avoid duplicates with interval poll

@@ -208,6 +208,7 @@ async def _execute_paired_comments(
     user_id: str,
     post_targets: List[Dict[str, Optional[str]]],
     post_content: str,
+    group_session_mapping: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     After a post campaign publishes, fetch all pending paired comments and fire them.
@@ -284,7 +285,7 @@ async def _execute_paired_comments(
                     logger.info(f"[Worker] Posting comment to group via Playwright: {fb_post_id}")
                     g_res = await _db(lambda: (
                         sb.table("target_groups")
-                        .select("url, session_id")
+                        .select("id, url, session_id")
                         .eq("user_id", user_id)
                         .execute()
                     ))
@@ -293,13 +294,15 @@ async def _execute_paired_comments(
                         u1 = row.get("url") or ""
                         u2 = fb_post_id or ""
                         if u1.strip("/").lower() == u2.strip("/").lower():
-                            session_id = row.get("session_id")
+                            g_id = row.get("id")
+                            session_id = (group_session_mapping or {}).get(g_id) or row.get("session_id")
                             break
                     if not session_id:
                         for row in (g_res.data or []):
                             u1 = row.get("url") or ""
                             if u1.strip("/") and u1.strip("/").lower() in fb_post_id.lower():
-                                session_id = row.get("session_id")
+                                g_id = row.get("id")
+                                session_id = (group_session_mapping or {}).get(g_id) or row.get("session_id")
                                 break
 
                     if not session_id:
@@ -914,6 +917,15 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
         target_page_ids  = campaign.get("target_pages")  or []
         target_groups    = await _resolve_target_groups(sb, user_id, group_uuids)
 
+        # Apply custom session overrides from metadata.group_session_mapping if present
+        metadata = campaign.get("metadata") or {}
+        session_mapping = metadata.get("group_session_mapping") or {}
+        if session_mapping:
+            for g in target_groups:
+                g_id = g.get("id")
+                if g_id in session_mapping:
+                    g["session_id"] = session_mapping[g_id]
+
         if not target_groups and not target_page_ids:
             raise RuntimeError("Campaign has no valid targets. Add groups or pages first.")
 
@@ -961,7 +973,7 @@ async def execute_campaign(sb: Client, campaign: Dict[str, Any]) -> None:
                 f"Post ID(s): {', '.join(post_ids)}"
             )
             await _execute_paired_comments(
-                sb, meta_api, token, campaign_id, user_id, post_targets, content
+                sb, meta_api, token, campaign_id, user_id, post_targets, content, session_mapping
             )
 
         elif action_type == "Like posts":
