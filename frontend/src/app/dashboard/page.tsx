@@ -1448,7 +1448,7 @@ export default function DashboardPage() {
                 )}
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
-                {/* Segmented control for Target Type */}
+{/* Segmented control for Target Type */}
                 <div style={{ marginBottom: "1.25rem" }}>
                   <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.375rem" }}>Target Type</label>
                   <div style={{ display: "flex", borderRadius: "0.5rem", border: "1px solid var(--border)", overflow: "hidden", height: "38px" }}>
@@ -1467,7 +1467,28 @@ export default function DashboardPage() {
                   <>
                     <div style={{ marginBottom: "1rem" }}>
                       <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-1)", marginBottom: "0.5rem" }}>Select Target Groups</label>
-                      {fbSessions.length === 0 ? (
+                      {sessionsLoading ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                          {[1, 2].map(i => (
+                            <div key={i} style={{ 
+                              height: "54px", 
+                              borderRadius: "0.5rem", 
+                              border: "1px solid var(--border)", 
+                              backgroundColor: "var(--input-bg)", 
+                              display: "flex", 
+                              alignItems: "center", 
+                              padding: "0.625rem 0.875rem",
+                              opacity: 0.6
+                            }}>
+                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "var(--border)", marginRight: "0.625rem" }} />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ width: "100px", height: "10px", borderRadius: "4px", backgroundColor: "var(--border)", marginBottom: "0.25rem" }} />
+                                <div style={{ width: "150px", height: "6px", borderRadius: "4px", backgroundColor: "var(--border)" }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : fbSessions.length === 0 ? (
                         <div style={{ padding: "1rem", borderRadius: "0.5rem", border: "1px dashed var(--border)", backgroundColor: "var(--hover-bg)", textAlign: "center" }}>
                           <p style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", color: "var(--text-3)" }}>No Facebook accounts connected. Please go to the Facebook Accounts page to connect one.</p>
                           <button type="button" onClick={() => setActiveNav("Facebook Accounts")} style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}>
