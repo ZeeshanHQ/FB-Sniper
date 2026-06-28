@@ -124,7 +124,7 @@ export default function DashboardPage() {
   const [addGroupLoading, setAddGroupLoading] = useState(false);
   const [addGroupResult, setAddGroupResult]   = useState<{ok:boolean;msg:string;data?:Record<string,unknown>}|null>(null);
   // ── Auto-fetch joined groups state ──
-  const [fetchingGroups, setFetchingGroups]   = useState(false);
+  const [fetchingSessionId, setFetchingSessionId] = useState<string | null>(null);
   const [fetchGroupsError, setFetchGroupsError] = useState<string|null>(null);
   const [showConnectInstructions, setShowConnectInstructions] = useState(false);
   const [copiedUserId, setCopiedUserId]         = useState(false);
@@ -630,7 +630,7 @@ export default function DashboardPage() {
 
   const handleFetchGroups = async (sid: string) => {
     if (!user?.id) return;
-    setFetchingGroups(true); setFetchGroupsError(null);
+    setFetchingSessionId(sid); setFetchGroupsError(null);
     try {
       const r = await fetch(`${apiBase}/api/fb/groups/fetch`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -642,7 +642,7 @@ export default function DashboardPage() {
         if (gData) setGroups(gData);
       } else setFetchGroupsError(d.detail || "Failed to fetch groups.");
     } catch (e: any) { setFetchGroupsError(e.message); }
-    finally { setFetchingGroups(false); }
+    finally { setFetchingSessionId(null); }
   };
 
   const handleAddGroup = async () => {
@@ -1509,10 +1509,10 @@ export default function DashboardPage() {
                             <button
                               type="button"
                               onClick={() => handleFetchGroups(selectedFbSessionId)}
-                              disabled={fetchingGroups}
+                              disabled={fetchingSessionId !== null}
                               style={{ ...btnPrimary, fontSize: "0.75rem", padding: "0.375rem 0.75rem", margin: "0 auto" }}
                             >
-                              {fetchingGroups ? "Fetching Groups…" : "Auto-fetch Groups"}
+                              {fetchingSessionId === selectedFbSessionId ? "Fetching Groups…" : "Auto-fetch Groups"}
                             </button>
                           </div>
                         )}
@@ -2243,8 +2243,8 @@ export default function DashboardPage() {
                       {isExpired && (
                         <button onClick={handleConnectFB} style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", border: "1px solid #fecaca", backgroundColor: "#fef2f2", color: "#ef4444", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}>Reconnect</button>
                       )}
-                      <button onClick={() => handleFetchGroups(s.id)} disabled={fetchingGroups || !isActive} style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-2)", fontSize: "0.75rem", fontWeight: 600, cursor: (!isActive || fetchingGroups) ? "not-allowed" : "pointer", opacity: (!isActive || fetchingGroups) ? 0.5 : 1 }}>
-                        {fetchingGroups ? "Fetching…" : "Auto-fetch Groups"}
+                      <button onClick={() => handleFetchGroups(s.id)} disabled={fetchingSessionId !== null || !isActive} style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", border: "1px solid var(--border)", backgroundColor: "var(--surface)", color: "var(--text-2)", fontSize: "0.75rem", fontWeight: 600, cursor: (!isActive || fetchingSessionId !== null) ? "not-allowed" : "pointer", opacity: (!isActive || fetchingSessionId !== null) ? 0.5 : 1 }}>
+                        {fetchingSessionId === s.id ? "Fetching…" : "Auto-fetch Groups"}
                       </button>
                       <button onClick={() => handleDisconnectSession(s.id)} style={{ padding: "0.375rem 0.625rem", borderRadius: "0.5rem", border: "1px solid #fecaca", backgroundColor: "transparent", color: "#ef4444", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}>Disconnect</button>
                     </div>
