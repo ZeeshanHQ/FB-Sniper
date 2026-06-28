@@ -1519,42 +1519,72 @@ export default function DashboardPage() {
                                   {sel && <CheckCircle2 size={15} color="#10b981" strokeWidth={2.5} />}
                                 </div>
 
-                                {sel && (
-                                  <div onClick={(e) => e.stopPropagation()} 
-                                    style={{ 
-                                      display: "flex", 
-                                      alignItems: "center", 
-                                      gap: "0.5rem", 
-                                      marginTop: "0.25rem", 
-                                      paddingTop: "0.5rem", 
-                                      borderTop: "1px dashed var(--border)" 
-                                    }}>
-                                    <span style={{ fontSize: "0.75rem", color: "var(--text-2)", fontWeight: 500 }}>Post As:</span>
-                                    <select
-                                      value={activeSessionId}
-                                      onChange={(e) => {
-                                        const newSid = e.target.value;
-                                        setGroupSessionOverrides(prev => ({ ...prev, [g.id]: newSid }));
-                                      }}
-                                      style={{ 
-                                        flex: 1, 
-                                        padding: "0.25rem 0.5rem", 
-                                        borderRadius: "0.375rem", 
-                                        border: "1px solid var(--border)", 
-                                        backgroundColor: "var(--surface)", 
-                                        color: "var(--text-1)", 
-                                        fontSize: "0.75rem", 
-                                        outline: "none" 
-                                      }}
-                                    >
-                                      {fbSessions.map(s => (
-                                        <option key={s.id} value={s.id}>
-                                          {s.fb_account_name || "Facebook Account"} {s.status === "expired" ? "(Expired)" : ""}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                )}
+                                {sel && (() => {
+                                  const activeSession = fbSessions.find(s => s.id === activeSessionId);
+                                  const isOwnerSelected = activeSession ? activeSession.id === g.session_id : false;
+                                  const normGUrl = (g.url || "").trim().replace(/\/+$/, "").toLowerCase();
+                                  const isMemberSelected = activeSession && !isOwnerSelected && groups.some(other => {
+                                    const normOtherUrl = (other.url || "").trim().replace(/\/+$/, "").toLowerCase();
+                                    return other.session_id === activeSession.id && normOtherUrl && normOtherUrl === normGUrl;
+                                  });
+                                  const showWarning = activeSession && !isOwnerSelected && !isMemberSelected;
+
+                                  return (
+                                    <>
+                                      <div onClick={(e) => e.stopPropagation()} 
+                                        style={{ 
+                                          display: "flex", 
+                                          alignItems: "center", 
+                                          gap: "0.5rem", 
+                                          marginTop: "0.25rem", 
+                                          paddingTop: "0.5rem", 
+                                          borderTop: "1px dashed var(--border)" 
+                                        }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-2)", fontWeight: 500 }}>Post As:</span>
+                                        <select
+                                          value={activeSessionId}
+                                          onChange={(e) => {
+                                            const newSid = e.target.value;
+                                            setGroupSessionOverrides(prev => ({ ...prev, [g.id]: newSid }));
+                                          }}
+                                          style={{ 
+                                            flex: 1, 
+                                            padding: "0.25rem 0.5rem", 
+                                            borderRadius: "0.375rem", 
+                                            border: "1px solid var(--border)", 
+                                            backgroundColor: "var(--surface)", 
+                                            color: "var(--text-1)", 
+                                            fontSize: "0.75rem", 
+                                            outline: "none" 
+                                          }}
+                                        >
+                                          {fbSessions.map(s => {
+                                            const sOwner = s.id === g.session_id;
+                                            const sMember = !sOwner && groups.some(other => {
+                                              const normOther = (other.url || "").trim().replace(/\/+$/, "").toLowerCase();
+                                              return other.session_id === s.id && normOther && normOther === normGUrl;
+                                            });
+                                            const statusText = sOwner 
+                                              ? " (Verified Owner)" 
+                                              : sMember 
+                                                ? " (Verified Member)" 
+                                                : " (⚠️ Unverified)";
+                                            return (
+                                              <option key={s.id} value={s.id}>
+                                                {s.fb_account_name || "Facebook Account"} {statusText} {s.status === "expired" ? "[Expired]" : ""}
+                                              </option>
+                                            );
+                                          })}
+                                        </select>
+                                      </div>
+                                      {showWarning && (
+                                        <p style={{ margin: "0.25rem 0 0 3.75rem", fontSize: "0.6875rem", color: "#d97706", fontWeight: 600 }}>
+                                          ⚠️ This account has not verified/fetched this group.
+                                        </p>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             );
                           })}
