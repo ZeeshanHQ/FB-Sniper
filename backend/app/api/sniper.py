@@ -5,7 +5,7 @@ Handles content fetching, posting, and automation
 
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import os
 from dotenv import load_dotenv
 from supabase import create_client
