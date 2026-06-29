@@ -1180,17 +1180,32 @@ async def comment_on_group_post(
             snippet = lines[0][:80] if lines else post_content[:80]
             snippet = " ".join(snippet.split()).strip()
 
-            logger.info(f"[fb_browser] Searching for post containing snippet: {snippet!r}")
+            # Clean emojis and special symbols to ensure robust text matching (e.g. emojis replaced with <img> on FB Web)
+            import re
+            clean_snippet = re.sub(r'[^\w\s\d.,!?\'"\-]', '', snippet)
+            clean_snippet = " ".join(clean_snippet.split()).strip()
+            if not clean_snippet:
+                clean_snippet = snippet
+
+            logger.info(f"[fb_browser] Searching for post containing snippet: {clean_snippet!r} (original: {snippet!r})")
 
             # Walk the DOM to find the post container and label it
             found = await page.evaluate("""
                 (snip) => {
                     const elements = Array.from(document.querySelectorAll('span, div, p'));
-                    const match = elements.find(el => {
-                        if (el.children.length > 0) return false;
+                    const matchingElements = elements.filter(el => {
                         const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ');
                         return text.includes(snip);
                     });
+                    
+                    // Pick the deepest matching element (none of its children must contain the snippet)
+                    const match = matchingElements.find(el => {
+                        return !Array.from(el.querySelectorAll('span, div, p')).some(child => {
+                            const childText = (child.innerText || child.textContent || '').replace(/\\s+/g, ' ');
+                            return childText.includes(snip);
+                        });
+                    });
+                    
                     if (!match) return false;
                     
                     let curr = match;
@@ -1210,16 +1225,18 @@ async def comment_on_group_post(
                     match.setAttribute('data-sniper-target-post', 'true');
                     return true;
                 }
-            """, snippet)
+            """, clean_snippet)
 
             if not found:
                 try:
-                    screenshot_path = "C:\\Users\\Admin\\.gemini\\antigravity\\brain\\7791a139-782b-46c1-9672-207670d46ba4\\diag_comment_find_fail.png"
+                    import tempfile
+                    import os
+                    screenshot_path = os.path.join(tempfile.gettempdir(), "diag_comment_find_fail.png")
                     await page.screenshot(path=screenshot_path)
                     logger.info(f"[fb_browser] Saved search failure screenshot to {screenshot_path}")
                 except Exception as ss_exc:
                     logger.warning(f"[fb_browser] Failed to take screenshot: {ss_exc}")
-                return {"success": False, "error": f"Could not find the post containing text snippet: {snippet!r}"}
+                return {"success": False, "error": f"Could not find the post containing text snippet: {clean_snippet!r}"}
 
             post_container = page.locator('[data-sniper-target-post="true"]').first
             await post_container.scroll_into_view_if_needed()
