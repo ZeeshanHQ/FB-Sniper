@@ -5,8 +5,7 @@
   "description": "Helper extension to securely connect your Facebook account to the Astraventa FB Sniper platform.",
   "permissions": [
     "cookies",
-    "storage",
-    "activeTab"
+    "storage"
   ],
   "host_permissions": [
     "https://*.facebook.com/*",
